@@ -30,7 +30,7 @@ StreamFlow adalah aplikasi live streaming yang memungkinkan kamu melakukan live 
 Untuk instalasi otomatis, jalankan perintah berikut:
 
 ```bash
-curl -o install.sh https://raw.imaduddinhelmi/streamnew/main/install.sh && chmod +x install.sh && ./install.sh
+curl -o install.sh https://raw.github.com/imaduddinhelmi/streamnew/main/install.sh && chmod +x install.sh && ./install.sh
 ```
 
 ## 🔧 Manual Installation
@@ -73,7 +73,7 @@ sudo apt install git -y
 
 Clone repository:
 ```bash
-git clone https://github.com/bangtutorial/streamflow
+git clone https://github.com/imaduddinhelmi/streamnew
 ```
 
 Masuk ke direktori project:
@@ -269,5 +269,6 @@ pm2 restart streamflow
 
 ---
 © 2025 - [Bang Tutorial](https://youtube.com/bangtutorial)
+
 
 
