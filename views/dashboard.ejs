@@ -133,11 +133,23 @@
             class="w-full bg-dark-700 border border-gray-600 text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:ring-1 focus:ring-primary">
           <i class="ti ti-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
         </div>
-        <button onclick="openNewStreamModal()"
-          class="w-full sm:w-auto flex items-center justify-center gap-2 bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors">
-          <i class="ti ti-plus"></i>
-          <span>New Stream</span>
-        </button>
+        <div class="flex flex-wrap gap-2 w-full sm:w-auto">
+          <button onclick="runAllStreams()"
+            class="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors">
+            <i class="ti ti-player-play"></i>
+            <span>Run All</span>
+          </button>
+          <button onclick="stopAllStreams()"
+            class="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors">
+            <i class="ti ti-player-stop"></i>
+            <span>Stop All</span>
+          </button>
+          <button onclick="openNewStreamModal()"
+            class="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors">
+            <i class="ti ti-plus"></i>
+            <span>New Stream</span>
+          </button>
+        </div>
       </div>
     </div>
     <div class="block md:hidden space-y-4">
@@ -2255,6 +2267,87 @@
         });
       }
     });
+
+    function runAllStreams() {
+      if (!confirm('Are you sure you want to start all offline streams?')) {
+        return;
+      }
+
+      const btn = event.target.closest('button');
+      const originalHTML = btn.innerHTML;
+      btn.innerHTML = '<i class="ti ti-loader animate-spin"></i> Starting...';
+      btn.disabled = true;
+
+      fetch('/api/streams/start-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            let message = data.message;
+            if (data.hasFailed && data.results.failed.length > 0) {
+              message += '\\n\\nFailed streams:\\n';
+              data.results.failed.forEach(f => {
+                message += `- ${f.title}: ${f.error}\\n`;
+              });
+            }
+            alert(message);
+            window.location.reload();
+          } else {
+            alert(`Error: ${data.error || 'Failed to start streams'}`);
+            btn.innerHTML = originalHTML;
+            btn.disabled = false;
+          }
+        })
+        .catch(error => {
+          console.error('Error starting all streams:', error);
+          alert(`An error occurred: ${error.message}`);
+          btn.innerHTML = originalHTML;
+          btn.disabled = false;
+        });
+    }
+
+    function stopAllStreams() {
+      if (!confirm('Are you sure you want to stop all active streams?')) {
+        return;
+      }
+
+      const btn = event.target.closest('button');
+      const originalHTML = btn.innerHTML;
+      btn.innerHTML = '<i class="ti ti-loader animate-spin"></i> Stopping...';
+      btn.disabled = true;
+
+      fetch('/api/streams/stop-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            let message = data.message;
+            if (data.hasFailed && data.results.failed.length > 0) {
+              message += '\\n\\nFailed streams:\\n';
+              data.results.failed.forEach(f => {
+                message += `- ${f.title}: ${f.error}\\n`;
+              });
+            }
+            alert(message);
+            window.location.reload();
+          } else {
+            alert(`Error: ${data.error || 'Failed to stop streams'}`);
+            btn.innerHTML = originalHTML;
+            btn.disabled = false;
+          }
+        })
+        .catch(error => {
+          console.error('Error stopping all streams:', error);
+          alert(`An error occurred: ${error.message}`);
+          btn.innerHTML = originalHTML;
+          btn.disabled = false;
+        });
+    }
+
   </script>
   <!-- Tips Streaming Modal -->
   <div id="tipsStreamingModal" class="fixed inset-0 bg-black/50 z-50 hidden modal-overlay overflow-y-auto">
@@ -2336,3 +2429,4 @@
       window._tipsPrevModal = null;
     }
   </script>
+

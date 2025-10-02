@@ -535,113 +535,9 @@ async function saveStreamHistory(stream) {
     return false;
   }
 }
-
-async function startAllStreams(userId) {
-  try {
-    console.log(`[StreamingService] Starting all streams for user ${userId}`);
-    const streams = await Stream.findAll(userId, 'offline');
-    
-    const results = {
-      success: [],
-      failed: [],
-      total: streams.length
-    };
-    
-    for (const stream of streams) {
-      if (!stream.video_id) {
-        results.failed.push({
-          id: stream.id,
-          title: stream.title,
-          error: 'No video attached'
-        });
-        continue;
-      }
-      
-      const result = await startStream(stream.id);
-      
-      if (result.success) {
-        results.success.push({
-          id: stream.id,
-          title: stream.title
-        });
-      } else {
-        results.failed.push({
-          id: stream.id,
-          title: stream.title,
-          error: result.error
-        });
-      }
-      
-      // Add small delay between starts to avoid overwhelming the system
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    console.log(`[StreamingService] Started ${results.success.length}/${results.total} streams for user ${userId}`);
-    
-    return {
-      success: true,
-      results
-    };
-  } catch (error) {
-    console.error('[StreamingService] Error starting all streams:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
-async function stopAllStreams(userId) {
-  try {
-    console.log(`[StreamingService] Stopping all streams for user ${userId}`);
-    const streams = await Stream.findAll(userId, 'live');
-    
-    const results = {
-      success: [],
-      failed: [],
-      total: streams.length
-    };
-    
-    for (const stream of streams) {
-      const result = await stopStream(stream.id);
-      
-      if (result.success) {
-        results.success.push({
-          id: stream.id,
-          title: stream.title
-        });
-      } else {
-        results.failed.push({
-          id: stream.id,
-          title: stream.title,
-          error: result.error
-        });
-      }
-      
-      // Add small delay between stops
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    
-    console.log(`[StreamingService] Stopped ${results.success.length}/${results.total} streams for user ${userId}`);
-    
-    return {
-      success: true,
-      results
-    };
-  } catch (error) {
-    console.error('[StreamingService] Error stopping all streams:', error);
-    return {
-      success: false,
-      error: error.message
-    };
-  }
-}
-
 module.exports = {
   startStream,
   stopStream,
-  startAllStreams,
-  stopAllStreams,
   isStreamActive,
   getActiveStreams,
   getStreamLogs,
@@ -649,8 +545,6 @@ module.exports = {
   saveStreamHistory
 };
 schedulerService.init(module.exports);
-
-
 
 
 

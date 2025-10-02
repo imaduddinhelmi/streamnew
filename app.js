@@ -1934,6 +1934,61 @@ app.get('/api/streams/:id/logs', isAuthenticated, async (req, res) => {
     res.status(500).json({ success: false, error: 'Failed to fetch stream logs' });
   }
 });
+
+app.post('/api/streams/start-all', isAuthenticated, async (req, res) => {
+  try {
+    console.log(`[API] Start all streams request from user ${req.session.userId}`);
+    const result = await streamingService.startAllStreams(req.session.userId);
+    
+    if (result.success) {
+      const message = `Started ${result.results.success.length} of ${result.results.total} streams`;
+      const failedCount = result.results.failed.length;
+      
+      return res.json({
+        success: true,
+        message,
+        results: result.results,
+        hasFailed: failedCount > 0
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'Failed to start streams'
+      });
+    }
+  } catch (error) {
+    console.error('Error starting all streams:', error);
+    res.status(500).json({ success: false, error: 'Failed to start all streams' });
+  }
+});
+
+app.post('/api/streams/stop-all', isAuthenticated, async (req, res) => {
+  try {
+    console.log(`[API] Stop all streams request from user ${req.session.userId}`);
+    const result = await streamingService.stopAllStreams(req.session.userId);
+    
+    if (result.success) {
+      const message = `Stopped ${result.results.success.length} of ${result.results.total} streams`;
+      const failedCount = result.results.failed.length;
+      
+      return res.json({
+        success: true,
+        message,
+        results: result.results,
+        hasFailed: failedCount > 0
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        error: result.error || 'Failed to stop streams'
+      });
+    }
+  } catch (error) {
+    console.error('Error stopping all streams:', error);
+    res.status(500).json({ success: false, error: 'Failed to stop all streams' });
+  }
+});
+
 app.get('/playlist', isAuthenticated, async (req, res) => {
   try {
     const playlists = await Playlist.findAll(req.session.userId);
@@ -2201,3 +2256,4 @@ const server = app.listen(port, '0.0.0.0', async () => {
 server.timeout = 30 * 60 * 1000;
 server.keepAliveTimeout = 30 * 60 * 1000;
 server.headersTimeout = 30 * 60 * 1000;
+
