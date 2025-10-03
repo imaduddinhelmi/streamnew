@@ -5,34 +5,95 @@ const { paths, getUniqueFilename } = require('./storage');
 
 function extractFileId(driveUrl) {
   let match = driveUrl.match(/\/file\/d\/([^\/]+)/);
-  if (match) return match[1];
+  if (match) return { type: 'file', id: match[1] };
 
   match = driveUrl.match(/\?id=([^&]+)/);
-  if (match) return match[1];
+  if (match) return { type: 'file', id: match[1] };
+
+  match = driveUrl.match(/\/folders\/([^\/\?]+)/);
+  if (match) return { type: 'folder', id: match[1] };
+
+  match = driveUrl.match(/\/drive\/folders\/([^\/\?]+)/);
+  if (match) return { type: 'folder', id: match[1] };
 
   match = driveUrl.match(/\/d\/([^\/]+)/);
-  if (match) return match[1];
+  if (match) return { type: 'file', id: match[1] };
 
   if (/^[a-zA-Z0-9_-]{25,}$/.test(driveUrl.trim())) {
-    return driveUrl.trim();
+    return { type: 'file', id: driveUrl.trim() };
   }
 
   throw new Error('Invalid Google Drive URL format');
 }
 
-async function downloadFile(fileId, progressCallback = null) {
+async function listFilesInFolder(folderId, apiKey = null) {
+  try {
+    console.log(`[GoogleDrive] Listing files in folder: ${folderId}`);
+    
+    if (!apiKey) {
+      apiKey = 'AIzaSyC1qbk75NzWjZfPI5BXVcTx4xGNjXyxXXY';
+    }
+    
+    const query = `'${folderId}' in parents`;
+    const apiUrl = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}&key=${apiKey}&fields=files(id,name,mimeType,size)`;
+    
+    console.log(`[GoogleDrive] Request URL: ${apiUrl}`);
+    
+    const response = await axios.get(apiUrl, {
+      headers: {
+        'Accept': 'application/json'
+      },
+      timeout: 30000
+    });
+    
+    if (response.data && response.data.files) {
+      const videoFiles = response.data.files.filter(file => 
+        file.mimeType && file.mimeType.startsWith('video/')
+      );
+      
+      console.log(`[GoogleDrive] Found ${videoFiles.length} video files in folder`);
+      return videoFiles;
+    }
+    
+    return [];
+  } catch (error) {
+    console.error('[GoogleDrive] Error listing folder files:', error.message);
+    
+    if (error.response) {
+      console.error('[GoogleDrive] Error response status:', error.response.status);
+      console.error('[GoogleDrive] Error response data:', JSON.stringify(error.response.data, null, 2));
+      
+      if (error.response.status === 404) {
+        throw new Error('Folder not found. Please check the Google Drive folder URL and ensure the folder ID is correct.');
+      } else if (error.response.status === 403) {
+        throw new Error('Access denied. Please make sure the folder is shared with "Anyone with the link".');
+      } else if (error.response.status === 400) {
+        const errorMsg = error.response.data?.error?.message || 'Invalid request';
+        throw new Error(`Bad request: ${errorMsg}. Please verify the folder URL and sharing permissions.`);
+      }
+    }
+    
+    throw new Error(`Failed to list folder contents: ${error.message}`);
+  }
+}
+
+async function downloadFile(fileId, progressCallback = null, apiKey = null) {
   try {
     const tempFilename = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const tempPath = path.join(paths.videos, tempFilename);
     
     console.log(`[GoogleDrive] Starting download for file ID: ${fileId}`);
     
+    if (!apiKey) {
+      apiKey = 'AIzaSyC1qbk75NzWjZfPI5BXVcTx4xGNjXyxXXY';
+    }
+    
     // Try multiple methods to download
     // Method 1: Direct download with uc endpoint
     const urls = [
       `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`,
       `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`,
-      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=AIzaSyC1qbk75NzWjZfPI5BXVcTx4xGNjXyxXXY`
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${apiKey}`
     ];
     
     let response = null;
@@ -280,5 +341,6 @@ async function downloadFile(fileId, progressCallback = null) {
 
 module.exports = {
   extractFileId,
-  downloadFile
+  downloadFile,
+  listFilesInFolder
 };

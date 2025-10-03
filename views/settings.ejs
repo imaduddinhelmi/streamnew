@@ -18,6 +18,11 @@
         data-tab="security">
         <i class="ti ti-shield-lock mr-2"></i>Security
       </button>
+      <button
+        class="settings-tab mr-2 py-2 px-4 text-gray-400 hover:text-white border-b-2 border-transparent hover:border-gray-700 font-medium"
+        data-tab="integrations">
+        <i class="ti ti-plug mr-2"></i>Integrations
+      </button>
     </div>
   </div>
   
@@ -136,6 +141,73 @@
           </div>
         </form>
 
+      </div>
+    </div>
+
+    <div id="integrations-tab" class="settings-content hidden">
+      <div class="p-6">
+        <h3 class="text-lg font-semibold mb-6">Integration Settings</h3>
+        
+        <div class="space-y-6">
+          <div class="bg-dark-900 rounded-lg p-6">
+            <div class="flex items-start space-x-4">
+              <div class="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                <i class="ti ti-brand-google-drive text-2xl text-blue-400"></i>
+              </div>
+              <div class="flex-1">
+                <h4 class="text-lg font-semibold mb-2">Google Drive</h4>
+                <p class="text-gray-400 text-sm mb-4">Connect your Google Drive to import videos directly from your drive folders</p>
+                
+                <form id="gdrive-form" class="space-y-4" action="/settings/integrations/gdrive" method="post">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <input type="hidden" name="activeTab" value="integrations">
+                  
+                  <div class="space-y-2">
+                    <label for="gdrive-api-key" class="block text-sm font-medium text-gray-300">Google Drive API Key</label>
+                    <div class="relative">
+                      <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                        <i class="ti ti-key"></i>
+                      </span>
+                      <input type="text" id="gdrive-api-key" name="apiKey"
+                        class="bg-dark-800 text-white pl-10 pr-4 py-2 rounded-lg block w-full focus:outline-none focus:ring-1 focus:ring-primary"
+                        placeholder="AIzaSy..."
+                        value="<%= user.gdrive_api_key || '' %>">
+                    </div>
+                    <p class="text-xs text-gray-400 mt-2">
+                      Get your API key from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-primary hover:underline">Google Cloud Console</a>. 
+                      Make sure to enable the Google Drive API for your project.
+                    </p>
+                  </div>
+                  
+                  <div class="flex items-center space-x-3">
+                    <button type="submit"
+                      class="px-4 py-2 bg-primary hover:bg-blue-600 text-white rounded-lg transition-colors">
+                      <i class="ti ti-check mr-2"></i>Save API Key
+                    </button>
+                    <% if (user.gdrive_api_key) { %>
+                    <span class="text-sm text-green-400 flex items-center">
+                      <i class="ti ti-circle-check mr-1"></i>Connected
+                    </span>
+                    <% } %>
+                  </div>
+                </form>
+                
+                <div class="mt-4 p-4 bg-dark-800 rounded-lg border border-gray-700">
+                  <h5 class="text-sm font-semibold mb-2 flex items-center">
+                    <i class="ti ti-info-circle mr-2 text-primary"></i>How to get your API Key
+                  </h5>
+                  <ol class="text-xs text-gray-400 space-y-1 ml-6 list-decimal">
+                    <li>Go to <a href="https://console.cloud.google.com/" target="_blank" class="text-primary hover:underline">Google Cloud Console</a></li>
+                    <li>Create a new project or select an existing one</li>
+                    <li>Enable the "Google Drive API" in APIs & Services</li>
+                    <li>Go to "Credentials" and create an API Key</li>
+                    <li>Copy the API key and paste it above</li>
+                  </ol>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 

@@ -197,6 +197,11 @@ class User {
         values.push(updateData.password);
       }
       
+      if (updateData.gdrive_api_key !== undefined) {
+        fields.push('gdrive_api_key = ?');
+        values.push(updateData.gdrive_api_key);
+      }
+      
       if (fields.length === 0) {
         return resolve({ id: userId, message: 'No fields to update' });
       }
