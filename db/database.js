@@ -147,6 +147,18 @@ function createTables() {
       console.error('Error adding status column:', err.message);
     }
   });
+  
+  db.run(`ALTER TABLE streams ADD COLUMN auto_daily_live BOOLEAN DEFAULT 0`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding auto_daily_live column:', err.message);
+    }
+  });
+  
+  db.run(`ALTER TABLE streams ADD COLUMN daily_start_time TEXT`, (err) => {
+    if (err && !err.message.includes('duplicate column name')) {
+      console.error('Error adding daily_start_time column:', err.message);
+    }
+  });
 }
 function checkIfUsersExist() {
   return new Promise((resolve, reject) => {

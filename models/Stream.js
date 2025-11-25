@@ -18,10 +18,13 @@ class Stream {
       schedule_time = null,
       duration = null,
       use_advanced_settings = false,
+      auto_daily_live = false,
+      daily_start_time = null,
       user_id
     } = streamData;
     const loop_video_int = loop_video ? 1 : 0;
     const use_advanced_settings_int = use_advanced_settings ? 1 : 0;
+    const auto_daily_live_int = auto_daily_live ? 1 : 0;
     const status = schedule_time ? 'scheduled' : 'offline';
     const status_updated_at = new Date().toISOString();
     return new Promise((resolve, reject) => {
@@ -29,12 +32,14 @@ class Stream {
         `INSERT INTO streams (
           id, title, video_id, rtmp_url, stream_key, platform, platform_icon,
           bitrate, resolution, fps, orientation, loop_video,
-          schedule_time, duration, status, status_updated_at, use_advanced_settings, user_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          schedule_time, duration, status, status_updated_at, use_advanced_settings, 
+          auto_daily_live, daily_start_time, user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id, title, video_id, rtmp_url, stream_key, platform, platform_icon,
           bitrate, resolution, fps, orientation, loop_video_int,
-          schedule_time, duration, status, status_updated_at, use_advanced_settings_int, user_id
+          schedule_time, duration, status, status_updated_at, use_advanced_settings_int,
+          auto_daily_live_int, daily_start_time, user_id
         ],
         function (err) {
           if (err) {
@@ -56,6 +61,7 @@ class Stream {
         if (row) {
           row.loop_video = row.loop_video === 1;
           row.use_advanced_settings = row.use_advanced_settings === 1;
+          row.auto_daily_live = row.auto_daily_live === 1;
         }
         resolve(row);
       });
@@ -106,6 +112,7 @@ class Stream {
           rows.forEach(row => {
             row.loop_video = row.loop_video === 1;
             row.use_advanced_settings = row.use_advanced_settings === 1;
+            row.auto_daily_live = row.auto_daily_live === 1;
           });
         }
         resolve(rows || []);
@@ -116,7 +123,7 @@ class Stream {
     const fields = [];
     const values = [];
     Object.entries(streamData).forEach(([key, value]) => {
-      if (key === 'loop_video' && typeof value === 'boolean') {
+      if ((key === 'loop_video' || key === 'auto_daily_live') && typeof value === 'boolean') {
         fields.push(`${key} = ?`);
         values.push(value ? 1 : 0);
       } else {
@@ -215,6 +222,7 @@ class Stream {
           if (row) {
             row.loop_video = row.loop_video === 1;
             row.use_advanced_settings = row.use_advanced_settings === 1;
+            row.auto_daily_live = row.auto_daily_live === 1;
           }
           resolve(row);
         }
@@ -267,6 +275,39 @@ class Stream {
           rows.forEach(row => {
             row.loop_video = row.loop_video === 1;
             row.use_advanced_settings = row.use_advanced_settings === 1;
+            row.auto_daily_live = row.auto_daily_live === 1;
+          });
+        }
+        resolve(rows || []);
+      });
+    });
+  }
+  static findAutoDailyLive() {
+    return new Promise((resolve, reject) => {
+      const query = `
+        SELECT s.*, 
+               v.title AS video_title, 
+               v.filepath AS video_filepath,
+               v.thumbnail_path AS video_thumbnail, 
+               v.duration AS video_duration,
+               v.resolution AS video_resolution,
+               v.bitrate AS video_bitrate,
+               v.fps AS video_fps  
+        FROM streams s
+        LEFT JOIN videos v ON s.video_id = v.id
+        WHERE s.auto_daily_live = 1
+        AND s.daily_start_time IS NOT NULL
+      `;
+      db.all(query, [], (err, rows) => {
+        if (err) {
+          console.error('Error finding auto daily live streams:', err.message);
+          return reject(err);
+        }
+        if (rows) {
+          rows.forEach(row => {
+            row.loop_video = row.loop_video === 1;
+            row.use_advanced_settings = row.use_advanced_settings === 1;
+            row.auto_daily_live = row.auto_daily_live === 1;
           });
         }
         resolve(rows || []);

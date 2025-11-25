@@ -126,7 +126,13 @@
   </div>
   <div class="mt-8">
     <div class="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mb-6">
-      <h2 class="text-xl font-bold">Streaming Status</h2>
+      <div class="flex flex-col gap-1">
+        <h2 class="text-xl font-bold">Streaming Status</h2>
+        <div class="flex items-center gap-2 text-sm text-gray-400">
+          <i class="ti ti-clock"></i>
+          <span id="dashboardServerTime">Loading...</span>
+        </div>
+      </div>
       <div class="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
         <div class="relative w-full sm:w-64">
           <input type="text" placeholder="Search streams..."
@@ -363,6 +369,26 @@
                     placeholder="Duration">
                   <span class="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400">minutes</span>
                 </div>
+              </div>
+              <div class="pt-4 border-t border-gray-700">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="h-[42px] flex items-center justify-between">
+                    <label class="text-sm text-gray-300">Auto Daily Live</label>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" id="autoDailyLive" name="autoDailyLive" class="sr-only peer">
+                      <div class="w-11 h-6 bg-dark-700 rounded-full peer peer-checked:bg-primary"></div>
+                      <div
+                        class="absolute left-[2px] top-[2px] w-5 h-5 bg-white rounded-full transition-all peer-checked:translate-x-5">
+                      </div>
+                    </label>
+                  </div>
+                  <div>
+                    <input type="time" id="dailyStartTime" name="dailyStartTime"
+                      class="w-full h-[42px] px-4 bg-dark-700 border border-gray-600 rounded-lg focus:border-primary focus:ring-1 focus:ring-primary text-sm [color-scheme:dark]"
+                      placeholder="Daily start time">
+                  </div>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">Enable this to automatically start streaming at the specified time every day</p>
               </div>
             </div>
             <div class="space-y-4">
@@ -647,6 +673,26 @@
                     placeholder="Duration">
                   <span class="absolute right-4 top-1/2 -translate-y-1/2 text-sm text-gray-400">minutes</span>
                 </div>
+              </div>
+              <div class="pt-4 border-t border-gray-700">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="h-[42px] flex items-center justify-between">
+                    <label class="text-sm text-gray-300">Auto Daily Live</label>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" id="editAutoDailyLive" name="autoDailyLive" class="sr-only peer">
+                      <div class="w-11 h-6 bg-dark-700 rounded-full peer peer-checked:bg-primary"></div>
+                      <div
+                        class="absolute left-[2px] top-[2px] w-5 h-5 bg-white rounded-full transition-all peer-checked:translate-x-5">
+                      </div>
+                    </label>
+                  </div>
+                  <div>
+                    <input type="time" id="editDailyStartTime" name="dailyStartTime"
+                      class="w-full h-[42px] px-4 bg-dark-700 border border-gray-600 rounded-lg focus:border-primary focus:ring-1 focus:ring-primary text-sm [color-scheme:dark]"
+                      placeholder="Daily start time">
+                  </div>
+                </div>
+                <p class="text-xs text-gray-400 mt-2">Enable this to automatically start streaming at the specified time every day</p>
               </div>
             </div>
             <div class="space-y-4">
@@ -1121,11 +1167,17 @@
       };
       const scheduleTime = document.querySelector('input[type="datetime-local"]').value;
       const duration = document.querySelector('input[type="number"]').value;
+      const autoDailyLive = document.getElementById('autoDailyLive').checked;
+      const dailyStartTime = document.getElementById('dailyStartTime').value;
       if (scheduleTime) {
         formData.scheduleTime = scheduleTime;
       }
       if (duration) {
         formData.duration = duration;
+      }
+      if (autoDailyLive && dailyStartTime) {
+        formData.autoDailyLive = true;
+        formData.dailyStartTime = dailyStartTime;
       }
       const csrfToken = document.querySelector('input[name="_csrf"]')?.value;
       fetch('/api/streams', {
@@ -1788,6 +1840,16 @@
       } else {
         document.getElementById('editDuration').value = '';
       }
+      if (stream.auto_daily_live) {
+        document.getElementById('editAutoDailyLive').checked = true;
+      } else {
+        document.getElementById('editAutoDailyLive').checked = false;
+      }
+      if (stream.daily_start_time) {
+        document.getElementById('editDailyStartTime').value = stream.daily_start_time;
+      } else {
+        document.getElementById('editDailyStartTime').value = '';
+      }
       const advancedSettingsContent = document.getElementById('editAdvancedSettingsContent');
       const advancedSettingsToggle = document.getElementById('editAdvancedSettingsToggle');
       const icon = advancedSettingsToggle.querySelector('i');
@@ -2108,11 +2170,20 @@
           };
           const scheduleTime = document.getElementById('editScheduleTime').value;
           const duration = document.getElementById('editDuration').value;
+          const autoDailyLive = document.getElementById('editAutoDailyLive').checked;
+          const dailyStartTime = document.getElementById('editDailyStartTime').value;
           if (scheduleTime) {
             formData.scheduleTime = scheduleTime;
           }
           if (duration) {
             formData.duration = parseInt(duration);
+          }
+          if (autoDailyLive && dailyStartTime) {
+            formData.autoDailyLive = true;
+            formData.dailyStartTime = dailyStartTime;
+          } else {
+            formData.autoDailyLive = false;
+            formData.dailyStartTime = null;
           }
           const csrfToken = document.querySelector('input[name="_csrf"]')?.value;
           fetch(`/api/streams/${streamId}`, {
@@ -2201,6 +2272,10 @@
         .then(data => {
           if (data.formattedTime) {
             const timeDisplay = `Server time: ${data.formattedTime}`;
+            const dashboardDisplay = document.getElementById('dashboardServerTime');
+            if (dashboardDisplay) {
+              dashboardDisplay.textContent = data.formattedTime;
+            }
             const createModalDisplay = document.getElementById('serverTimeDisplay');
             if (createModalDisplay) {
               createModalDisplay.textContent = timeDisplay;
@@ -2215,9 +2290,42 @@
           console.error('Error fetching server time:', error);
         });
     }
+    let lastStreamStatuses = {};
+    function checkStreamStatusChanges() {
+      fetch('/api/streams')
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.streams) {
+            let hasStatusChange = false;
+            data.streams.forEach(stream => {
+              if (lastStreamStatuses[stream.id] !== undefined && lastStreamStatuses[stream.id] !== stream.status) {
+                hasStatusChange = true;
+              }
+              lastStreamStatuses[stream.id] = stream.status;
+            });
+            if (hasStatusChange) {
+              console.log('Stream status changed, refreshing page...');
+              window.location.reload();
+            }
+          }
+        })
+        .catch(error => {
+          console.error('Error checking stream status:', error);
+        });
+    }
     document.addEventListener('DOMContentLoaded', function () {
       updateServerTime();
       setInterval(updateServerTime, 1000);
+      fetch('/api/streams')
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.streams) {
+            data.streams.forEach(stream => {
+              lastStreamStatuses[stream.id] = stream.status;
+            });
+          }
+        });
+      setInterval(checkStreamStatusChanges, 10000);
     });
     document.addEventListener('DOMContentLoaded', function () {
       const searchInput = document.querySelector('input[placeholder="Search streams..."]');

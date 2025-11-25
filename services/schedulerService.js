@@ -7,8 +7,10 @@ function init(streamingServiceInstance) {
   console.log('Stream scheduler initialized');
   setInterval(checkScheduledStreams, 60 * 1000);
   setInterval(checkStreamDurations, 60 * 1000);
+  setInterval(checkAutoDailyLiveStreams, 60 * 1000);
   checkScheduledStreams();
   checkStreamDurations();
+  checkAutoDailyLiveStreams();
 }
 async function checkScheduledStreams() {
   try {
@@ -93,6 +95,36 @@ function cancelStreamTermination(streamId) {
 }
 function handleStreamStopped(streamId) {
   return cancelStreamTermination(streamId);
+}
+async function checkAutoDailyLiveStreams() {
+  try {
+    if (!streamingService) {
+      console.error('StreamingService not initialized in scheduler');
+      return;
+    }
+    const autoDailyStreams = await Stream.findAutoDailyLive();
+    if (autoDailyStreams.length === 0) {
+      return;
+    }
+    const now = new Date();
+    const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    for (const stream of autoDailyStreams) {
+      if (stream.daily_start_time === currentTime && stream.status === 'offline') {
+        console.log(`Starting auto daily live stream: ${stream.id} - ${stream.title} at ${currentTime}`);
+        const result = await streamingService.startStream(stream.id);
+        if (result.success) {
+          console.log(`Successfully started auto daily live stream: ${stream.id}`);
+          if (stream.duration) {
+            scheduleStreamTermination(stream.id, stream.duration);
+          }
+        } else {
+          console.error(`Failed to start auto daily live stream ${stream.id}: ${result.error}`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error checking auto daily live streams:', error);
+  }
 }
 module.exports = {
   init,

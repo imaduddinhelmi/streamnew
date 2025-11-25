@@ -2007,6 +2007,10 @@ app.post('/api/streams', isAuthenticated, [
     if (req.body.duration) {
       streamData.duration = parseInt(req.body.duration);
     }
+    if (req.body.autoDailyLive && req.body.dailyStartTime) {
+      streamData.auto_daily_live = req.body.autoDailyLive === 'true' || req.body.autoDailyLive === true;
+      streamData.daily_start_time = req.body.dailyStartTime;
+    }
     streamData.status = req.body.scheduleTime ? 'scheduled' : 'offline';
     const stream = await Stream.create(streamData);
     res.json({ success: true, stream });
@@ -2068,6 +2072,15 @@ app.put('/api/streams/:id', isAuthenticated, async (req, res) => {
     } else if ('scheduleTime' in req.body && !req.body.scheduleTime) {
       updateData.schedule_time = null;
       updateData.status = 'offline';
+    }
+    if (req.body.autoDailyLive !== undefined) {
+      updateData.auto_daily_live = req.body.autoDailyLive === 'true' || req.body.autoDailyLive === true;
+    }
+    if (req.body.dailyStartTime !== undefined) {
+      updateData.daily_start_time = req.body.dailyStartTime || null;
+    }
+    if (req.body.duration !== undefined) {
+      updateData.duration = req.body.duration ? parseInt(req.body.duration) : null;
     }
     
     const updatedStream = await Stream.update(req.params.id, updateData);
