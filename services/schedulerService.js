@@ -6,7 +6,7 @@ function init(streamingServiceInstance) {
   streamingService = streamingServiceInstance;
   console.log('Stream scheduler initialized');
   setInterval(checkScheduledStreams, 60 * 1000);
-  setInterval(checkStreamDurations, 60 * 1000);
+  setInterval(checkStreamDurations, 10 * 1000);
   setInterval(checkAutoDailyLiveStreams, 60 * 1000);
   checkScheduledStreams();
   checkStreamDurations();
@@ -48,17 +48,24 @@ async function checkStreamDurations() {
       return;
     }
     const liveStreams = await Stream.findAll(null, 'live');
+    const now = new Date();
+    
     for (const stream of liveStreams) {
-      if (stream.duration && stream.start_time && !scheduledTerminations.has(stream.id)) {
+      if (stream.duration && stream.start_time) {
         const startTime = new Date(stream.start_time);
         const durationMs = stream.duration * 60 * 1000;
         const shouldEndAt = new Date(startTime.getTime() + durationMs);
-        const now = new Date();
-        if (shouldEndAt <= now) {
-          console.log(`Stream ${stream.id} exceeded duration, stopping now`);
+        const timeUntilEnd = shouldEndAt.getTime() - now.getTime();
+        
+        if (timeUntilEnd <= 0) {
+          console.log(`[SchedulerService] Stream ${stream.id} exceeded duration by ${Math.abs(timeUntilEnd / 1000)}s, stopping immediately`);
+          if (scheduledTerminations.has(stream.id)) {
+            clearTimeout(scheduledTerminations.get(stream.id));
+            scheduledTerminations.delete(stream.id);
+          }
           await streamingService.stopStream(stream.id);
-        } else {
-          const timeUntilEnd = shouldEndAt.getTime() - now.getTime();
+        } else if (!scheduledTerminations.has(stream.id)) {
+          console.log(`[SchedulerService] Stream ${stream.id} will end in ${Math.round(timeUntilEnd / 1000)}s, scheduling termination`);
           scheduleStreamTermination(stream.id, timeUntilEnd / 60000);
         }
       }
@@ -70,16 +77,18 @@ async function checkStreamDurations() {
 function scheduleStreamTermination(streamId, durationMinutes) {
   if (scheduledTerminations.has(streamId)) {
     clearTimeout(scheduledTerminations.get(streamId));
+    console.log(`[SchedulerService] Clearing existing termination schedule for stream ${streamId}`);
   }
-  const durationMs = durationMinutes * 60 * 1000;
-  console.log(`Scheduling termination for stream ${streamId} after ${durationMinutes} minutes`);
+  const durationMs = Math.max(1000, durationMinutes * 60 * 1000);
+  console.log(`[SchedulerService] Scheduling termination for stream ${streamId} after ${durationMinutes.toFixed(2)} minutes (${Math.round(durationMs / 1000)}s)`);
   const timeoutId = setTimeout(async () => {
     try {
-      console.log(`Terminating stream ${streamId} after ${durationMinutes} minute duration`);
-      await streamingService.stopStream(streamId);
+      console.log(`[SchedulerService] Terminating stream ${streamId} after scheduled duration of ${durationMinutes.toFixed(2)} minutes`);
       scheduledTerminations.delete(streamId);
+      await streamingService.stopStream(streamId);
     } catch (error) {
-      console.error(`Error terminating stream ${streamId}:`, error);
+      console.error(`[SchedulerService] Error terminating stream ${streamId}:`, error);
+      scheduledTerminations.delete(streamId);
     }
   }, durationMs);
   scheduledTerminations.set(streamId, timeoutId);

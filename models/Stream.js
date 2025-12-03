@@ -159,7 +159,7 @@ class Stream {
       );
     });
   }
-  static updateStatus(id, status, userId) {
+  static updateStatus(id, status, userId = null) {
     const status_updated_at = new Date().toISOString();
     let start_time = null;
     let end_time = null;
@@ -169,30 +169,43 @@ class Stream {
       end_time = new Date().toISOString();
     }
     return new Promise((resolve, reject) => {
-      db.run(
-        `UPDATE streams SET 
+      let query, params;
+      if (userId) {
+        query = `UPDATE streams SET 
           status = ?, 
           status_updated_at = ?, 
           start_time = COALESCE(?, start_time), 
           end_time = COALESCE(?, end_time),
           updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND user_id = ?`,
-        [status, status_updated_at, start_time, end_time, id, userId],
-        function (err) {
-          if (err) {
-            console.error('Error updating stream status:', err.message);
-            return reject(err);
-          }
-          resolve({
-            id,
-            status,
-            status_updated_at,
-            start_time,
-            end_time,
-            updated: this.changes > 0
-          });
+         WHERE id = ? AND user_id = ?`;
+        params = [status, status_updated_at, start_time, end_time, id, userId];
+      } else {
+        query = `UPDATE streams SET 
+          status = ?, 
+          status_updated_at = ?, 
+          start_time = COALESCE(?, start_time), 
+          end_time = COALESCE(?, end_time),
+          updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`;
+        params = [status, status_updated_at, start_time, end_time, id];
+      }
+      db.run(query, params, function (err) {
+        if (err) {
+          console.error('Error updating stream status:', err.message);
+          return reject(err);
         }
-      );
+        if (this.changes === 0) {
+          console.warn(`[Stream.updateStatus] No rows updated for stream ${id}, status: ${status}, userId: ${userId || 'not provided'}`);
+        }
+        resolve({
+          id,
+          status,
+          status_updated_at,
+          start_time,
+          end_time,
+          updated: this.changes > 0
+        });
+      });
     });
   }
   static async getStreamWithVideo(id) {

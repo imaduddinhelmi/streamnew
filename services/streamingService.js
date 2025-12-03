@@ -259,13 +259,16 @@ async function startStream(streamId) {
       console.log(`[FFMPEG_EXIT] ${streamId}: Code=${code}, Signal=${signal}`);
       const wasActive = activeStreams.delete(streamId);
       const isManualStop = manuallyStoppingStreams.has(streamId);
+      
+      const stream = await Stream.findById(streamId);
+      
       if (isManualStop) {
         console.log(`[StreamingService] Stream ${streamId} was manually stopped, not restarting`);
         manuallyStoppingStreams.delete(streamId);
         if (wasActive) {
           try {
-            await Stream.updateStatus(streamId, 'offline');
-            if (typeof schedulerService !== 'undefined' && schedulerService.cancelStreamTermination) {
+            await Stream.updateStatus(streamId, 'offline', stream?.user_id);
+            if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
               schedulerService.handleStreamStopped(streamId);
             }
           } catch (error) {
@@ -287,7 +290,18 @@ async function startStream(streamId) {
                 const result = await startStream(streamId);
                 if (!result.success) {
                   console.error(`[StreamingService] Failed to restart stream: ${result.error}`);
-                  await Stream.updateStatus(streamId, 'offline');
+                  await Stream.updateStatus(streamId, 'offline', streamInfo.user_id);
+                  if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+                    schedulerService.handleStreamStopped(streamId);
+                  }
+                } else {
+                  if (streamInfo.duration && typeof schedulerService !== 'undefined') {
+                    const elapsed = stream.start_time ? (Date.now() - new Date(stream.start_time).getTime()) / 60000 : 0;
+                    const remainingDuration = Math.max(0, streamInfo.duration - elapsed);
+                    if (remainingDuration > 0) {
+                      schedulerService.scheduleStreamTermination(streamId, remainingDuration);
+                    }
+                  }
                 }
               } else {
                 console.error(`[StreamingService] Cannot restart stream ${streamId}: not found in database`);
@@ -295,7 +309,11 @@ async function startStream(streamId) {
             } catch (error) {
               console.error(`[StreamingService] Error during stream restart: ${error.message}`);
               try {
-                await Stream.updateStatus(streamId, 'offline');
+                const streamInfo = await Stream.findById(streamId);
+                await Stream.updateStatus(streamId, 'offline', streamInfo?.user_id);
+                if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+                  schedulerService.handleStreamStopped(streamId);
+                }
               } catch (dbError) {
                 console.error(`Error updating stream status: ${dbError.message}`);
               }
@@ -324,12 +342,27 @@ async function startStream(streamId) {
                   const result = await startStream(streamId);
                   if (!result.success) {
                     console.error(`[StreamingService] Failed to restart stream: ${result.error}`);
-                    await Stream.updateStatus(streamId, 'offline');
+                    await Stream.updateStatus(streamId, 'offline', streamInfo.user_id);
+                    if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+                      schedulerService.handleStreamStopped(streamId);
+                    }
+                  } else {
+                    if (streamInfo.duration && typeof schedulerService !== 'undefined') {
+                      const elapsed = stream.start_time ? (Date.now() - new Date(stream.start_time).getTime()) / 60000 : 0;
+                      const remainingDuration = Math.max(0, streamInfo.duration - elapsed);
+                      if (remainingDuration > 0) {
+                        schedulerService.scheduleStreamTermination(streamId, remainingDuration);
+                      }
+                    }
                   }
                 }
               } catch (error) {
                 console.error(`[StreamingService] Error during stream restart: ${error.message}`);
-                await Stream.updateStatus(streamId, 'offline');
+                const streamInfo = await Stream.findById(streamId);
+                await Stream.updateStatus(streamId, 'offline', streamInfo?.user_id);
+                if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+                  schedulerService.handleStreamStopped(streamId);
+                }
               }
             }, 3000);
             return;
@@ -338,8 +371,8 @@ async function startStream(streamId) {
         if (wasActive) {
           try {
             console.log(`[StreamingService] Updating stream ${streamId} status to offline after FFmpeg exit`);
-            await Stream.updateStatus(streamId, 'offline');
-            if (typeof schedulerService !== 'undefined' && schedulerService.cancelStreamTermination) {
+            await Stream.updateStatus(streamId, 'offline', stream?.user_id);
+            if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
               schedulerService.handleStreamStopped(streamId);
             }
           } catch (error) {
@@ -353,7 +386,11 @@ async function startStream(streamId) {
       console.error(`[FFMPEG_PROCESS_ERROR] ${streamId}: ${err.message}`);
       activeStreams.delete(streamId);
       try {
-        await Stream.updateStatus(streamId, 'offline');
+        const stream = await Stream.findById(streamId);
+        await Stream.updateStatus(streamId, 'offline', stream?.user_id);
+        if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+          schedulerService.handleStreamStopped(streamId);
+        }
       } catch (error) {
         console.error(`Error updating stream status: ${error.message}`);
       }
@@ -435,7 +472,10 @@ async function syncStreamStatuses() {
       const isReallyActive = activeStreams.has(stream.id);
       if (!isReallyActive) {
         console.log(`[StreamingService] Found inconsistent stream ${stream.id}: marked as 'live' in DB but not active in memory`);
-        await Stream.updateStatus(stream.id, 'offline');
+        await Stream.updateStatus(stream.id, 'offline', stream.user_id);
+        if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+          schedulerService.handleStreamStopped(stream.id);
+        }
         console.log(`[StreamingService] Updated stream ${stream.id} status to 'offline'`);
       }
     }
@@ -445,7 +485,7 @@ async function syncStreamStatuses() {
       if (!stream || stream.status !== 'live') {
         console.log(`[StreamingService] Found inconsistent stream ${streamId}: active in memory but not 'live' in DB`);
         if (stream) {
-          await Stream.updateStatus(streamId, 'live');
+          await Stream.updateStatus(streamId, 'live', stream.user_id);
           console.log(`[StreamingService] Updated stream ${streamId} status to 'live'`);
         } else {
           console.log(`[StreamingService] Stream ${streamId} not found in DB, removing from active streams`);
@@ -458,6 +498,9 @@ async function syncStreamStatuses() {
             }
           }
           activeStreams.delete(streamId);
+          if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+            schedulerService.handleStreamStopped(streamId);
+          }
         }
       }
     }
