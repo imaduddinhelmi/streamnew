@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
@@ -7,6 +7,35 @@ const { v4: uuidv4 } = require('uuid');
 const { db } = require('../db/database');
 const Stream = require('../models/Stream');
 const Playlist = require('../models/Playlist');
+
+// Helper function to forcefully kill FFmpeg process (platform-aware)
+function forceKillProcess(ffmpegProcess, pid) {
+  return new Promise((resolve) => {
+    if (!pid) {
+      resolve(false);
+      return;
+    }
+
+    if (process.platform === 'win32') {
+      // Windows: use taskkill with /T to kill child processes too
+      exec(`taskkill /pid ${pid} /f /t`, (err) => {
+        if (err) {
+          console.log(`[StreamingService] taskkill error (may already be dead): ${err.message}`);
+        }
+        resolve(!err);
+      });
+    } else {
+      // Unix: use SIGKILL
+      try {
+        ffmpegProcess.kill('SIGKILL');
+        resolve(true);
+      } catch (e) {
+        console.log(`[StreamingService] SIGKILL error: ${e.message}`);
+        resolve(false);
+      }
+    }
+  });
+}
 let ffmpegPath;
 if (fs.existsSync('/usr/bin/ffmpeg')) {
   ffmpegPath = '/usr/bin/ffmpeg';
@@ -39,12 +68,12 @@ async function buildFFmpegArgsForPlaylist(stream, playlist) {
   if (!playlist.videos || playlist.videos.length === 0) {
     throw new Error(`Playlist is empty for playlist_id: ${stream.video_id}`);
   }
-  
+
   const projectRoot = path.resolve(__dirname, '..');
   const rtmpUrl = `${stream.rtmp_url.replace(/\/$/, '')}/${stream.stream_key}`;
-  
+
   let videoPaths = [];
-  
+
   if (playlist.is_shuffle || playlist.shuffle) {
     const shuffledVideos = [...playlist.videos].sort(() => Math.random() - 0.5);
     videoPaths = shuffledVideos.map(video => {
@@ -57,20 +86,20 @@ async function buildFFmpegArgsForPlaylist(stream, playlist) {
       return path.join(projectRoot, 'public', relativeVideoPath);
     });
   }
-  
+
   for (const videoPath of videoPaths) {
     if (!fs.existsSync(videoPath)) {
       throw new Error(`Video file not found: ${videoPath}`);
     }
   }
-  
+
   const concatFile = path.join(projectRoot, 'temp', `playlist_${stream.id}.txt`);
-  
+
   const tempDir = path.dirname(concatFile);
   if (!fs.existsSync(tempDir)) {
     fs.mkdirSync(tempDir, { recursive: true });
   }
-  
+
   let concatContent = '';
   if (stream.loop_video) {
     for (let i = 0; i < 1000; i++) {
@@ -83,9 +112,9 @@ async function buildFFmpegArgsForPlaylist(stream, playlist) {
       concatContent += `file '${videoPath.replace(/\\/g, '/')}'\n`;
     });
   }
-  
+
   fs.writeFileSync(concatFile, concatContent);
-  
+
   if (!stream.use_advanced_settings) {
     return [
       '-hwaccel', 'auto',
@@ -105,11 +134,11 @@ async function buildFFmpegArgsForPlaylist(stream, playlist) {
       rtmpUrl
     ];
   }
-  
+
   const resolution = stream.resolution || '1280x720';
   const bitrate = stream.bitrate || 2500;
   const fps = stream.fps || 30;
-  
+
   return [
     '-hwaccel', 'auto',
     '-loglevel', 'info',
@@ -139,27 +168,27 @@ async function buildFFmpegArgsForPlaylist(stream, playlist) {
 
 async function buildFFmpegArgs(stream) {
   const streamWithVideo = await Stream.getStreamWithVideo(stream.id);
-  
+
   if (streamWithVideo && streamWithVideo.video_type === 'playlist') {
     const Playlist = require('../models/Playlist');
     const playlist = await Playlist.findByIdWithVideos(stream.video_id);
-    
+
     if (!playlist) {
       throw new Error(`Playlist not found for playlist_id: ${stream.video_id}`);
     }
-    
+
     return await buildFFmpegArgsForPlaylist(stream, playlist);
   }
-  
+
   const video = await Video.findById(stream.video_id);
   if (!video) {
     throw new Error(`Video record not found in database for video_id: ${stream.video_id}`);
   }
-  
+
   const relativeVideoPath = video.filepath.startsWith('/') ? video.filepath.substring(1) : video.filepath;
   const projectRoot = path.resolve(__dirname, '..');
   const videoPath = path.join(projectRoot, 'public', relativeVideoPath);
-  
+
   if (!fs.existsSync(videoPath)) {
     console.error(`[StreamingService] CRITICAL: Video file not found on disk.`);
     console.error(`[StreamingService] Checked path: ${videoPath}`);
@@ -169,7 +198,7 @@ async function buildFFmpegArgs(stream) {
     console.error(`[StreamingService] process.cwd(): ${process.cwd()}`);
     throw new Error('Video file not found on disk. Please check paths and file existence.');
   }
-  
+
   const rtmpUrl = `${stream.rtmp_url.replace(/\/$/, '')}/${stream.stream_key}`;
   const loopArgs = stream.loop_video ? ['-stream_loop', '-1'] : ['-stream_loop', '0'];
   if (!stream.use_advanced_settings) {
@@ -259,9 +288,9 @@ async function startStream(streamId) {
       console.log(`[FFMPEG_EXIT] ${streamId}: Code=${code}, Signal=${signal}`);
       const wasActive = activeStreams.delete(streamId);
       const isManualStop = manuallyStoppingStreams.has(streamId);
-      
+
       const stream = await Stream.findById(streamId);
-      
+
       if (isManualStop) {
         console.log(`[StreamingService] Stream ${streamId} was manually stopped, not restarting`);
         manuallyStoppingStreams.delete(streamId);
@@ -430,15 +459,46 @@ async function stopStream(streamId) {
     addStreamLog(streamId, 'Stopping stream...');
     console.log(`[StreamingService] Stopping active stream ${streamId}`);
     manuallyStoppingStreams.add(streamId);
+
+    const pid = ffmpegProcess.pid;
+    let killed = false;
+
+    // Try graceful SIGTERM first
     try {
       ffmpegProcess.kill('SIGTERM');
+      console.log(`[StreamingService] Sent SIGTERM to process ${pid}`);
     } catch (killError) {
-      console.error(`[StreamingService] Error killing FFmpeg process: ${killError.message}`);
-      manuallyStoppingStreams.delete(streamId);
+      console.error(`[StreamingService] Error sending SIGTERM: ${killError.message}`);
     }
+
+    // Wait up to 3 seconds for process to exit gracefully
+    const exitPromise = new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        console.log(`[StreamingService] Timeout waiting for process ${pid} to exit`);
+        resolve(false);
+      }, 3000);
+
+      ffmpegProcess.once('exit', () => {
+        clearTimeout(timeout);
+        console.log(`[StreamingService] Process ${pid} exited gracefully`);
+        resolve(true);
+      });
+    });
+
+    killed = await exitPromise;
+
+    // If still running after timeout, force kill
+    if (!killed && pid) {
+      console.log(`[StreamingService] SIGTERM failed for stream ${streamId}, using force kill on PID ${pid}`);
+      addStreamLog(streamId, 'Force killing process...');
+      await forceKillProcess(ffmpegProcess, pid);
+      // Give it a moment to actually die
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
     const stream = await Stream.findById(streamId);
     activeStreams.delete(streamId);
-    
+
     const tempConcatFile = path.join(__dirname, '..', 'temp', `playlist_${streamId}.txt`);
     try {
       if (fs.existsSync(tempConcatFile)) {
@@ -448,7 +508,7 @@ async function stopStream(streamId) {
     } catch (cleanupError) {
       console.error(`[StreamingService] Error cleaning up temporary file: ${cleanupError.message}`);
     }
-    
+
     if (stream) {
       await Stream.updateStatus(streamId, 'offline', stream.user_id);
       const updatedStream = await Stream.findById(streamId);
@@ -583,13 +643,13 @@ async function startAllStreams(userId) {
   try {
     console.log(`[StreamingService] Starting all streams for user ${userId}`);
     const streams = await Stream.findAll(userId, 'offline');
-    
+
     const results = {
       success: [],
       failed: [],
       total: streams.length
     };
-    
+
     for (const stream of streams) {
       if (!stream.video_id) {
         results.failed.push({
@@ -599,9 +659,9 @@ async function startAllStreams(userId) {
         });
         continue;
       }
-      
+
       const result = await startStream(stream.id);
-      
+
       if (result.success) {
         results.success.push({
           id: stream.id,
@@ -614,13 +674,13 @@ async function startAllStreams(userId) {
           error: result.error
         });
       }
-      
+
       // Add small delay between starts to avoid overwhelming the system
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    
+
     console.log(`[StreamingService] Started ${results.success.length}/${results.total} streams for user ${userId}`);
-    
+
     return {
       success: true,
       results
@@ -638,16 +698,16 @@ async function stopAllStreams(userId) {
   try {
     console.log(`[StreamingService] Stopping all streams for user ${userId}`);
     const streams = await Stream.findAll(userId, 'live');
-    
+
     const results = {
       success: [],
       failed: [],
       total: streams.length
     };
-    
+
     for (const stream of streams) {
       const result = await stopStream(stream.id);
-      
+
       if (result.success) {
         results.success.push({
           id: stream.id,
@@ -660,13 +720,13 @@ async function stopAllStreams(userId) {
           error: result.error
         });
       }
-      
+
       // Add small delay between stops
       await new Promise(resolve => setTimeout(resolve, 500));
     }
-    
+
     console.log(`[StreamingService] Stopped ${results.success.length}/${results.total} streams for user ${userId}`);
-    
+
     return {
       success: true,
       results
