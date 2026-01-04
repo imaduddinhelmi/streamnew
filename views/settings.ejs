@@ -1,12 +1,12 @@
 <% layout('layout') -%>
-  
+
   <div class="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
     <div>
       <h2 class="text-2xl font-bold">Settings</h2>
       <p class="text-gray-400 text-sm mt-1">Manage your account and preferences</p>
     </div>
   </div>
-  
+
   <div class="mb-6 border-b border-gray-700">
     <div class="flex flex-wrap -mb-px">
       <button class="settings-tab active mr-2 py-2 px-4 text-primary border-b-2 border-primary font-medium"
@@ -23,11 +23,16 @@
         data-tab="integrations">
         <i class="ti ti-plug mr-2"></i>Integrations
       </button>
+      <button
+        class="settings-tab mr-2 py-2 px-4 text-gray-400 hover:text-white border-b-2 border-transparent hover:border-gray-700 font-medium"
+        data-tab="backup">
+        <i class="ti ti-database-export mr-2"></i>Backup
+      </button>
     </div>
   </div>
-  
+
   <div class="bg-gray-800 rounded-lg overflow-hidden">
-    
+
     <div id="profile-tab" class="settings-content">
       <div class="p-6">
         <h3 class="text-lg font-semibold mb-6">Profile Settings</h3>
@@ -35,7 +40,7 @@
           enctype="multipart/form-data">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <input type="hidden" name="activeTab" value="profile">
-          
+
           <div class="space-y-4">
             <label class="block text-sm font-medium text-gray-300">Profile Photo</label>
             <div class="flex items-center space-x-6">
@@ -59,7 +64,7 @@
               </div>
             </div>
           </div>
-          
+
           <div class="space-y-2">
             <label for="username" class="block text-sm font-medium text-gray-300">Username</label>
             <div class="relative">
@@ -71,7 +76,7 @@
                 value="<%= user.username %>">
             </div>
           </div>
-          
+
           <div class="pt-4">
             <button type="submit"
               class="px-4 py-2 bg-primary hover:bg-blue-600 text-white rounded-lg transition-colors">
@@ -81,14 +86,14 @@
         </form>
       </div>
     </div>
-    
+
     <div id="security-tab" class="settings-content hidden">
       <div class="p-6">
         <h3 class="text-lg font-semibold mb-6">Security Settings</h3>
         <form id="password-form" class="space-y-6" action="/settings/password" method="post">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <input type="hidden" name="activeTab" value="security">
-          
+
           <div class="space-y-2">
             <label for="current-password" class="block text-sm font-medium text-gray-300">Current Password</label>
             <div class="relative">
@@ -100,7 +105,7 @@
                 placeholder="Enter your current password">
             </div>
           </div>
-          
+
           <div class="space-y-2">
             <label for="new-password" class="block text-sm font-medium text-gray-300">New Password</label>
             <div class="relative sm:max-w-md">
@@ -120,7 +125,7 @@
               Password must be at least 8 characters and include uppercase, lowercase and a number
             </div>
           </div>
-          
+
           <div class="space-y-2">
             <label for="confirm-password" class="block text-sm font-medium text-gray-300">Confirm New Password</label>
             <div class="relative sm:max-w-md">
@@ -132,7 +137,7 @@
                 placeholder="Confirm new password">
             </div>
           </div>
-          
+
           <div class="pt-4">
             <button type="submit"
               class="px-4 py-2 bg-primary hover:bg-blue-600 text-white rounded-lg transition-colors">
@@ -147,7 +152,7 @@
     <div id="integrations-tab" class="settings-content hidden">
       <div class="p-6">
         <h3 class="text-lg font-semibold mb-6">Integration Settings</h3>
-        
+
         <div class="space-y-6">
           <div class="bg-dark-900 rounded-lg p-6">
             <div class="flex items-start space-x-4">
@@ -156,48 +161,51 @@
               </div>
               <div class="flex-1">
                 <h4 class="text-lg font-semibold mb-2">Google Drive</h4>
-                <p class="text-gray-400 text-sm mb-4">Connect your Google Drive to import videos directly from your drive folders</p>
-                
+                <p class="text-gray-400 text-sm mb-4">Connect your Google Drive to import videos directly from your
+                  drive folders</p>
+
                 <form id="gdrive-form" class="space-y-4" action="/settings/integrations/gdrive" method="post">
                   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                   <input type="hidden" name="activeTab" value="integrations">
-                  
+
                   <div class="space-y-2">
-                    <label for="gdrive-api-key" class="block text-sm font-medium text-gray-300">Google Drive API Key</label>
+                    <label for="gdrive-api-key" class="block text-sm font-medium text-gray-300">Google Drive API
+                      Key</label>
                     <div class="relative">
                       <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
                         <i class="ti ti-key"></i>
                       </span>
                       <input type="text" id="gdrive-api-key" name="apiKey"
                         class="bg-dark-800 text-white pl-10 pr-4 py-2 rounded-lg block w-full focus:outline-none focus:ring-1 focus:ring-primary"
-                        placeholder="AIzaSy..."
-                        value="<%= user.gdrive_api_key || '' %>">
+                        placeholder="AIzaSy..." value="<%= user.gdrive_api_key || '' %>">
                     </div>
                     <p class="text-xs text-gray-400 mt-2">
-                      Get your API key from <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-primary hover:underline">Google Cloud Console</a>. 
+                      Get your API key from <a href="https://console.cloud.google.com/apis/credentials" target="_blank"
+                        class="text-primary hover:underline">Google Cloud Console</a>.
                       Make sure to enable the Google Drive API for your project.
                     </p>
                   </div>
-                  
+
                   <div class="flex items-center space-x-3">
                     <button type="submit"
                       class="px-4 py-2 bg-primary hover:bg-blue-600 text-white rounded-lg transition-colors">
                       <i class="ti ti-check mr-2"></i>Save API Key
                     </button>
                     <% if (user.gdrive_api_key) { %>
-                    <span class="text-sm text-green-400 flex items-center">
-                      <i class="ti ti-circle-check mr-1"></i>Connected
-                    </span>
-                    <% } %>
+                      <span class="text-sm text-green-400 flex items-center">
+                        <i class="ti ti-circle-check mr-1"></i>Connected
+                      </span>
+                      <% } %>
                   </div>
                 </form>
-                
+
                 <div class="mt-4 p-4 bg-dark-800 rounded-lg border border-gray-700">
                   <h5 class="text-sm font-semibold mb-2 flex items-center">
                     <i class="ti ti-info-circle mr-2 text-primary"></i>How to get your API Key
                   </h5>
                   <ol class="text-xs text-gray-400 space-y-1 ml-6 list-decimal">
-                    <li>Go to <a href="https://console.cloud.google.com/" target="_blank" class="text-primary hover:underline">Google Cloud Console</a></li>
+                    <li>Go to <a href="https://console.cloud.google.com/" target="_blank"
+                        class="text-primary hover:underline">Google Cloud Console</a></li>
                     <li>Create a new project or select an existing one</li>
                     <li>Enable the "Google Drive API" in APIs & Services</li>
                     <li>Go to "Credentials" and create an API Key</li>
@@ -211,8 +219,93 @@
       </div>
     </div>
 
+    <div id="backup-tab" class="settings-content hidden">
+      <div class="p-6">
+        <h3 class="text-lg font-semibold mb-6">Backup & Restore</h3>
+
+        <div class="space-y-6">
+          <!-- Export Section -->
+          <div class="bg-dark-900 rounded-lg p-6">
+            <div class="flex items-start space-x-4">
+              <div class="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                <i class="ti ti-download text-2xl text-green-400"></i>
+              </div>
+              <div class="flex-1">
+                <h4 class="text-lg font-semibold mb-2">Export Streams</h4>
+                <p class="text-gray-400 text-sm mb-4">Download all your stream configurations as a JSON file. You can
+                  use this to backup your settings or migrate to a new server.</p>
+
+                <button id="export-streams-btn" type="button"
+                  class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex items-center">
+                  <i class="ti ti-file-download mr-2"></i>Export to JSON
+                </button>
+
+                <div class="mt-4 p-4 bg-dark-800 rounded-lg border border-gray-700">
+                  <h5 class="text-sm font-semibold mb-2 flex items-center">
+                    <i class="ti ti-info-circle mr-2 text-primary"></i>What gets exported
+                  </h5>
+                  <ul class="text-xs text-gray-400 space-y-1 ml-6 list-disc">
+                    <li>Stream titles, RTMP URLs, and stream keys</li>
+                    <li>Platform settings (YouTube, Twitch, etc.)</li>
+                    <li>Quality settings (resolution, bitrate, FPS)</li>
+                    <li>Scheduling and duration settings</li>
+                    <li>Video/playlist references (not the actual files)</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Import Section -->
+          <div class="bg-dark-900 rounded-lg p-6">
+            <div class="flex items-start space-x-4">
+              <div class="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                <i class="ti ti-upload text-2xl text-blue-400"></i>
+              </div>
+              <div class="flex-1">
+                <h4 class="text-lg font-semibold mb-2">Import Streams</h4>
+                <p class="text-gray-400 text-sm mb-4">Restore your stream configurations from a previously exported JSON
+                  file.</p>
+
+                <form id="import-form" enctype="multipart/form-data">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <div class="flex items-center space-x-3">
+                    <label
+                      class="flex items-center px-4 py-2 bg-dark-800 hover:bg-dark-700 text-white rounded-lg transition-colors cursor-pointer border border-gray-600">
+                      <i class="ti ti-file-upload mr-2"></i>
+                      <span id="import-file-label">Choose File</span>
+                      <input type="file" id="import-file" name="backup" accept=".json" class="hidden">
+                    </label>
+                    <button type="submit" id="import-streams-btn"
+                      class="px-4 py-2 bg-primary hover:bg-blue-600 text-white rounded-lg transition-colors flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled>
+                      <i class="ti ti-file-import mr-2"></i>Import
+                    </button>
+                  </div>
+                </form>
+
+                <div id="import-result" class="mt-4 hidden"></div>
+
+                <div class="mt-4 p-4 bg-yellow-900/20 rounded-lg border border-yellow-700/50">
+                  <h5 class="text-sm font-semibold mb-2 flex items-center text-yellow-400">
+                    <i class="ti ti-alert-triangle mr-2"></i>Important Notes
+                  </h5>
+                  <ul class="text-xs text-gray-400 space-y-1 ml-6 list-disc">
+                    <li>Video files are NOT included in the backup</li>
+                    <li>You need to upload videos separately on the new server</li>
+                    <li>Streams will be imported without video attachment</li>
+                    <li>Existing streams with same title will NOT be overwritten</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
-  
+
   <div id="toast"
     class="fixed top-16 right-4 bg-dark-800 text-white px-4 py-3 rounded-lg shadow-lg z-50 hidden flex items-center">
     <i id="toast-icon" class="mr-2"></i>
@@ -328,6 +421,119 @@
           toast.classList.add('hidden');
         }, 3000);
       }
+
+      // Export Streams
+      const exportBtn = document.getElementById('export-streams-btn');
+      if (exportBtn) {
+        exportBtn.addEventListener('click', async () => {
+          exportBtn.disabled = true;
+          exportBtn.innerHTML = '<i class="ti ti-loader-2 animate-spin mr-2"></i>Exporting...';
+          try {
+            const response = await fetch('/api/streams/export');
+            if (!response.ok) {
+              throw new Error('Export failed');
+            }
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `streams-backup-${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+            showToast('success', 'Streams exported successfully!');
+          } catch (error) {
+            console.error('Export error:', error);
+            showToast('error', 'Failed to export streams');
+          } finally {
+            exportBtn.disabled = false;
+            exportBtn.innerHTML = '<i class="ti ti-file-download mr-2"></i>Export to JSON';
+          }
+        });
+      }
+
+      // Import Streams
+      const importFile = document.getElementById('import-file');
+      const importBtn = document.getElementById('import-streams-btn');
+      const importForm = document.getElementById('import-form');
+      const importFileLabel = document.getElementById('import-file-label');
+      const importResult = document.getElementById('import-result');
+
+      if (importFile) {
+        importFile.addEventListener('change', (e) => {
+          const file = e.target.files[0];
+          if (file) {
+            importFileLabel.textContent = file.name;
+            importBtn.disabled = false;
+          } else {
+            importFileLabel.textContent = 'Choose File';
+            importBtn.disabled = true;
+          }
+        });
+      }
+
+      if (importForm) {
+        importForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const file = importFile.files[0];
+          if (!file) {
+            showToast('error', 'Please select a file to import');
+            return;
+          }
+
+          importBtn.disabled = true;
+          importBtn.innerHTML = '<i class="ti ti-loader-2 animate-spin mr-2"></i>Importing...';
+
+          try {
+            const formData = new FormData();
+            formData.append('backup', file);
+            formData.append('_csrf', document.querySelector('input[name="_csrf"]').value);
+
+            const response = await fetch('/api/streams/import', {
+              method: 'POST',
+              body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+              importResult.className = 'mt-4 p-4 bg-green-900/20 rounded-lg border border-green-700/50';
+              importResult.innerHTML = `
+                <div class="flex items-center text-green-400">
+                  <i class="ti ti-check mr-2"></i>
+                  <span class="font-semibold">Import Successful!</span>
+                </div>
+                <p class="text-sm text-gray-400 mt-2">
+                  ${result.imported} stream(s) imported, ${result.skipped} skipped (duplicates)
+                </p>
+              `;
+              importResult.classList.remove('hidden');
+              showToast('success', `Successfully imported ${result.imported} stream(s)`);
+            } else {
+              throw new Error(result.error || 'Import failed');
+            }
+          } catch (error) {
+            console.error('Import error:', error);
+            importResult.className = 'mt-4 p-4 bg-red-900/20 rounded-lg border border-red-700/50';
+            importResult.innerHTML = `
+              <div class="flex items-center text-red-400">
+                <i class="ti ti-x mr-2"></i>
+                <span class="font-semibold">Import Failed</span>
+              </div>
+              <p class="text-sm text-gray-400 mt-2">${error.message}</p>
+            `;
+            importResult.classList.remove('hidden');
+            showToast('error', 'Failed to import streams');
+          } finally {
+            importBtn.disabled = false;
+            importBtn.innerHTML = '<i class="ti ti-file-import mr-2"></i>Import';
+            importFile.value = '';
+            importFileLabel.textContent = 'Choose File';
+          }
+        });
+      }
+
     <% if (typeof success !== 'undefined' && success) { %>
         showToast('success', '<%= success %>');
     <% } %>

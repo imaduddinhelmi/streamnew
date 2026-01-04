@@ -22,6 +22,16 @@ const avatarStorage = multer.diskStorage({
   }
 });
 
+const backupStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, paths.avatars); // Use avatars folder temporarily for backup files
+  },
+  filename: (req, file, cb) => {
+    const uniqueFilename = getUniqueFilename(file.originalname);
+    cb(null, uniqueFilename);
+  }
+});
+
 const videoFilter = (req, file, cb) => {
   const allowedFormats = ['video/mp4', 'video/avi', 'video/quicktime'];
   const fileExt = path.extname(file.originalname).toLowerCase();
@@ -44,6 +54,15 @@ const imageFilter = (req, file, cb) => {
   }
 };
 
+const jsonFilter = (req, file, cb) => {
+  const fileExt = path.extname(file.originalname).toLowerCase();
+  if (file.mimetype === 'application/json' || fileExt === '.json') {
+    cb(null, true);
+  } else {
+    cb(new Error('Only .json format is allowed'), false);
+  }
+};
+
 const uploadVideo = multer({
   storage: videoStorage,
   fileFilter: videoFilter
@@ -54,7 +73,13 @@ const upload = multer({
   fileFilter: imageFilter
 });
 
+const uploadBackup = multer({
+  storage: backupStorage,
+  fileFilter: jsonFilter
+});
+
 module.exports = {
   uploadVideo,
-  upload
+  upload,
+  uploadBackup
 };

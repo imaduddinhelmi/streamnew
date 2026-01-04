@@ -316,6 +316,10 @@ async function startStream(streamId) {
             try {
               const streamInfo = await Stream.findById(streamId);
               if (streamInfo) {
+                // Cancel any existing termination timer before restart to prevent race condition
+                if (typeof schedulerService !== 'undefined' && schedulerService.cancelStreamTermination) {
+                  schedulerService.cancelStreamTermination(streamId);
+                }
                 const result = await startStream(streamId);
                 if (!result.success) {
                   console.error(`[StreamingService] Failed to restart stream: ${result.error}`);
@@ -325,7 +329,8 @@ async function startStream(streamId) {
                   }
                 } else {
                   if (streamInfo.duration && typeof schedulerService !== 'undefined') {
-                    const elapsed = stream.start_time ? (Date.now() - new Date(stream.start_time).getTime()) / 60000 : 0;
+                    // Use streamInfo.start_time (fresh from DB) instead of stale stream variable
+                    const elapsed = streamInfo.start_time ? (Date.now() - new Date(streamInfo.start_time).getTime()) / 60000 : 0;
                     const remainingDuration = Math.max(0, streamInfo.duration - elapsed);
                     if (remainingDuration > 0) {
                       schedulerService.scheduleStreamTermination(streamId, remainingDuration);
@@ -368,6 +373,10 @@ async function startStream(streamId) {
               try {
                 const streamInfo = await Stream.findById(streamId);
                 if (streamInfo) {
+                  // Cancel any existing termination timer before restart to prevent race condition
+                  if (typeof schedulerService !== 'undefined' && schedulerService.cancelStreamTermination) {
+                    schedulerService.cancelStreamTermination(streamId);
+                  }
                   const result = await startStream(streamId);
                   if (!result.success) {
                     console.error(`[StreamingService] Failed to restart stream: ${result.error}`);
@@ -377,7 +386,8 @@ async function startStream(streamId) {
                     }
                   } else {
                     if (streamInfo.duration && typeof schedulerService !== 'undefined') {
-                      const elapsed = stream.start_time ? (Date.now() - new Date(stream.start_time).getTime()) / 60000 : 0;
+                      // Use streamInfo.start_time (fresh from DB) instead of stale stream variable
+                      const elapsed = streamInfo.start_time ? (Date.now() - new Date(streamInfo.start_time).getTime()) / 60000 : 0;
                       const remainingDuration = Math.max(0, streamInfo.duration - elapsed);
                       if (remainingDuration > 0) {
                         schedulerService.scheduleStreamTermination(streamId, remainingDuration);

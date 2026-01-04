@@ -49,14 +49,14 @@ async function checkStreamDurations() {
     }
     const liveStreams = await Stream.findAll(null, 'live');
     const now = new Date();
-    
+
     for (const stream of liveStreams) {
       if (stream.duration && stream.start_time) {
         const startTime = new Date(stream.start_time);
         const durationMs = stream.duration * 60 * 1000;
         const shouldEndAt = new Date(startTime.getTime() + durationMs);
         const timeUntilEnd = shouldEndAt.getTime() - now.getTime();
-        
+
         if (timeUntilEnd <= 0) {
           console.log(`[SchedulerService] Stream ${stream.id} exceeded duration by ${Math.abs(timeUntilEnd / 1000)}s, stopping immediately`);
           if (scheduledTerminations.has(stream.id)) {
@@ -65,7 +65,7 @@ async function checkStreamDurations() {
           }
           await streamingService.stopStream(stream.id);
         } else if (!scheduledTerminations.has(stream.id)) {
-          console.log(`[SchedulerService] Stream ${stream.id} will end in ${Math.round(timeUntilEnd / 1000)}s, scheduling termination`);
+          console.log(`[SchedulerService] Stream ${stream.id} has no termination scheduled (safety net), creating one for ${Math.round(timeUntilEnd / 1000)}s`);
           scheduleStreamTermination(stream.id, timeUntilEnd / 60000);
         }
       }
