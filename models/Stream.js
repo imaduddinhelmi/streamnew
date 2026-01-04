@@ -208,6 +208,43 @@ class Stream {
       });
     });
   }
+  // Update status only without changing start_time or end_time - used for restarts
+  static updateStatusOnly(id, status, userId = null) {
+    const status_updated_at = new Date().toISOString();
+    return new Promise((resolve, reject) => {
+      let query, params;
+      if (userId) {
+        query = `UPDATE streams SET 
+          status = ?, 
+          status_updated_at = ?, 
+          updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND user_id = ?`;
+        params = [status, status_updated_at, id, userId];
+      } else {
+        query = `UPDATE streams SET 
+          status = ?, 
+          status_updated_at = ?, 
+          updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`;
+        params = [status, status_updated_at, id];
+      }
+      db.run(query, params, function (err) {
+        if (err) {
+          console.error('Error updating stream status only:', err.message);
+          return reject(err);
+        }
+        if (this.changes === 0) {
+          console.warn(`[Stream.updateStatusOnly] No rows updated for stream ${id}, status: ${status}`);
+        }
+        resolve({
+          id,
+          status,
+          status_updated_at,
+          updated: this.changes > 0
+        });
+      });
+    });
+  }
   static async getStreamWithVideo(id) {
     return new Promise((resolve, reject) => {
       db.get(

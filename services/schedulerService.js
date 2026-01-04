@@ -57,16 +57,34 @@ async function checkStreamDurations() {
         const shouldEndAt = new Date(startTime.getTime() + durationMs);
         const timeUntilEnd = shouldEndAt.getTime() - now.getTime();
 
+        // Check if stream is actually active in memory before taking action
+        const isActive = streamingService.isStreamActive ? streamingService.isStreamActive(stream.id) : true;
+
         if (timeUntilEnd <= 0) {
-          console.log(`[SchedulerService] Stream ${stream.id} exceeded duration by ${Math.abs(timeUntilEnd / 1000)}s, stopping immediately`);
-          if (scheduledTerminations.has(stream.id)) {
-            clearTimeout(scheduledTerminations.get(stream.id));
-            scheduledTerminations.delete(stream.id);
+          // Only stop if stream is actually active
+          if (isActive) {
+            console.log(`[SchedulerService] Stream ${stream.id} exceeded duration by ${Math.abs(timeUntilEnd / 1000).toFixed(0)}s, stopping immediately`);
+            if (scheduledTerminations.has(stream.id)) {
+              clearTimeout(scheduledTerminations.get(stream.id));
+              scheduledTerminations.delete(stream.id);
+            }
+            await streamingService.stopStream(stream.id);
+          } else {
+            // Update DB status if stream is not active but marked as live
+            console.log(`[SchedulerService] Stream ${stream.id} exceeded duration but not active in memory, fixing status`);
+            await Stream.updateStatus(stream.id, 'offline', stream.user_id);
+            if (scheduledTerminations.has(stream.id)) {
+              clearTimeout(scheduledTerminations.get(stream.id));
+              scheduledTerminations.delete(stream.id);
+            }
           }
-          await streamingService.stopStream(stream.id);
-        } else if (!scheduledTerminations.has(stream.id)) {
-          console.log(`[SchedulerService] Stream ${stream.id} has no termination scheduled (safety net), creating one for ${Math.round(timeUntilEnd / 1000)}s`);
-          scheduleStreamTermination(stream.id, timeUntilEnd / 60000);
+        } else if (!scheduledTerminations.has(stream.id) && isActive) {
+          // Only create safety net timer if stream is active and has more than 30 seconds remaining
+          // This prevents creating unnecessary timers for streams that are about to end anyway
+          if (timeUntilEnd > 30000) {
+            console.log(`[SchedulerService] Stream ${stream.id} has no termination scheduled (safety net), creating one for ${Math.round(timeUntilEnd / 1000)}s`);
+            scheduleStreamTermination(stream.id, timeUntilEnd / 60000);
+          }
         }
       }
     }

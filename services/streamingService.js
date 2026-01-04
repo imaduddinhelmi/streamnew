@@ -50,6 +50,9 @@ const streamLogs = new Map();
 const streamRetryCount = new Map();
 const MAX_RETRY_ATTEMPTS = 3;
 const manuallyStoppingStreams = new Set();
+const restartingStreams = new Set(); // Track streams currently in restart process
+const lastRestartAttempt = new Map(); // Track last restart time for cooldown
+const RESTART_COOLDOWN_MS = 10000; // 10 second cooldown between restart attempts
 const MAX_LOG_LINES = 100;
 function addStreamLog(streamId, message) {
   if (!streamLogs.has(streamId)) {
@@ -247,26 +250,59 @@ async function buildFFmpegArgs(stream) {
     rtmpUrl
   ];
 }
-async function startStream(streamId) {
+async function startStream(streamId, isRestart = false) {
   try {
-    streamRetryCount.set(streamId, 0);
+    // Check cooldown for restart attempts
+    if (isRestart) {
+      const lastAttempt = lastRestartAttempt.get(streamId);
+      if (lastAttempt && (Date.now() - lastAttempt) < RESTART_COOLDOWN_MS) {
+        console.log(`[StreamingService] Stream ${streamId} is in cooldown period, skipping restart`);
+        return { success: false, error: 'Restart cooldown active' };
+      }
+      lastRestartAttempt.set(streamId, Date.now());
+    } else {
+      // Only reset retry count for fresh starts, not restarts
+      streamRetryCount.set(streamId, 0);
+    }
+
     if (activeStreams.has(streamId)) {
       return { success: false, error: 'Stream is already active' };
     }
+
+    // Check if stream is already in restart process
+    if (restartingStreams.has(streamId)) {
+      console.log(`[StreamingService] Stream ${streamId} is already restarting, skipping duplicate restart`);
+      return { success: false, error: 'Stream is already restarting' };
+    }
+
+    if (isRestart) {
+      restartingStreams.add(streamId);
+    }
+
     const stream = await Stream.findById(streamId);
     if (!stream) {
+      restartingStreams.delete(streamId);
       return { success: false, error: 'Stream not found' };
     }
     const ffmpegArgs = await buildFFmpegArgs(stream);
     const fullCommand = `${ffmpegPath} ${ffmpegArgs.join(' ')}`;
-    addStreamLog(streamId, `Starting stream with command: ${fullCommand}`);
-    console.log(`Starting stream: ${fullCommand}`);
+    addStreamLog(streamId, `${isRestart ? 'Restarting' : 'Starting'} stream with command: ${fullCommand}`);
+    console.log(`${isRestart ? 'Restarting' : 'Starting'} stream: ${fullCommand}`);
     const ffmpegProcess = spawn(ffmpegPath, ffmpegArgs, {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
     activeStreams.set(streamId, ffmpegProcess);
-    await Stream.updateStatus(streamId, 'live', stream.user_id);
+
+    // For restarts, don't update start_time to preserve original timing
+    if (!isRestart) {
+      await Stream.updateStatus(streamId, 'live', stream.user_id);
+    } else {
+      // Only update status to 'live' without changing start_time
+      await Stream.updateStatusOnly(streamId, 'live', stream.user_id);
+    }
+
+    restartingStreams.delete(streamId);
     ffmpegProcess.stdout.on('data', (data) => {
       const message = data.toString().trim();
       if (message) {
@@ -308,24 +344,32 @@ async function startStream(streamId) {
       }
       if (signal === 'SIGSEGV') {
         const retryCount = streamRetryCount.get(streamId) || 0;
-        if (retryCount < MAX_RETRY_ATTEMPTS) {
+        if (retryCount < MAX_RETRY_ATTEMPTS && !restartingStreams.has(streamId)) {
           streamRetryCount.set(streamId, retryCount + 1);
           console.log(`[StreamingService] FFmpeg crashed with SIGSEGV. Attempting restart #${retryCount + 1} for stream ${streamId}`);
           addStreamLog(streamId, `FFmpeg crashed with SIGSEGV. Attempting restart #${retryCount + 1}`);
           setTimeout(async () => {
             try {
+              // Double-check stream hasn't been manually stopped or is restarting
+              if (manuallyStoppingStreams.has(streamId) || restartingStreams.has(streamId)) {
+                console.log(`[StreamingService] Stream ${streamId} was stopped or is restarting, aborting restart`);
+                return;
+              }
+
               const streamInfo = await Stream.findById(streamId);
               if (streamInfo) {
                 // Cancel any existing termination timer before restart to prevent race condition
                 if (typeof schedulerService !== 'undefined' && schedulerService.cancelStreamTermination) {
                   schedulerService.cancelStreamTermination(streamId);
                 }
-                const result = await startStream(streamId);
+                const result = await startStream(streamId, true); // Pass isRestart = true
                 if (!result.success) {
                   console.error(`[StreamingService] Failed to restart stream: ${result.error}`);
-                  await Stream.updateStatus(streamId, 'offline', streamInfo.user_id);
-                  if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
-                    schedulerService.handleStreamStopped(streamId);
+                  if (result.error !== 'Stream is already restarting' && result.error !== 'Restart cooldown active') {
+                    await Stream.updateStatus(streamId, 'offline', streamInfo.user_id);
+                    if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+                      schedulerService.handleStreamStopped(streamId);
+                    }
                   }
                 } else {
                   if (streamInfo.duration && typeof schedulerService !== 'undefined') {
@@ -333,7 +377,11 @@ async function startStream(streamId) {
                     const elapsed = streamInfo.start_time ? (Date.now() - new Date(streamInfo.start_time).getTime()) / 60000 : 0;
                     const remainingDuration = Math.max(0, streamInfo.duration - elapsed);
                     if (remainingDuration > 0) {
+                      console.log(`[StreamingService] Stream ${streamId} has ${remainingDuration.toFixed(2)} minutes remaining after restart`);
                       schedulerService.scheduleStreamTermination(streamId, remainingDuration);
+                    } else {
+                      console.log(`[StreamingService] Stream ${streamId} exceeded duration, stopping immediately`);
+                      await stopStream(streamId);
                     }
                   }
                 }
@@ -342,6 +390,7 @@ async function startStream(streamId) {
               }
             } catch (error) {
               console.error(`[StreamingService] Error during stream restart: ${error.message}`);
+              restartingStreams.delete(streamId);
               try {
                 const streamInfo = await Stream.findById(streamId);
                 await Stream.updateStatus(streamId, 'offline', streamInfo?.user_id);
@@ -352,7 +401,10 @@ async function startStream(streamId) {
                 console.error(`Error updating stream status: ${dbError.message}`);
               }
             }
-          }, 3000);
+          }, 5000); // Increased delay to 5 seconds to reduce rapid restart issues
+          return;
+        } else if (restartingStreams.has(streamId)) {
+          console.log(`[StreamingService] Stream ${streamId} is already restarting, skipping duplicate restart attempt`);
           return;
         } else {
           console.error(`[StreamingService] Maximum retry attempts (${MAX_RETRY_ATTEMPTS}) reached for stream ${streamId}`);
@@ -366,23 +418,31 @@ async function startStream(streamId) {
           addStreamLog(streamId, errorMessage);
           console.error(`[StreamingService] ${errorMessage} for stream ${streamId}`);
           const retryCount = streamRetryCount.get(streamId) || 0;
-          if (retryCount < MAX_RETRY_ATTEMPTS) {
+          if (retryCount < MAX_RETRY_ATTEMPTS && !restartingStreams.has(streamId)) {
             streamRetryCount.set(streamId, retryCount + 1);
             console.log(`[StreamingService] FFmpeg exited with code ${code}. Attempting restart #${retryCount + 1} for stream ${streamId}`);
             setTimeout(async () => {
               try {
+                // Double-check stream hasn't been manually stopped or is restarting
+                if (manuallyStoppingStreams.has(streamId) || restartingStreams.has(streamId)) {
+                  console.log(`[StreamingService] Stream ${streamId} was stopped or is restarting, aborting restart`);
+                  return;
+                }
+
                 const streamInfo = await Stream.findById(streamId);
                 if (streamInfo) {
                   // Cancel any existing termination timer before restart to prevent race condition
                   if (typeof schedulerService !== 'undefined' && schedulerService.cancelStreamTermination) {
                     schedulerService.cancelStreamTermination(streamId);
                   }
-                  const result = await startStream(streamId);
+                  const result = await startStream(streamId, true); // Pass isRestart = true
                   if (!result.success) {
                     console.error(`[StreamingService] Failed to restart stream: ${result.error}`);
-                    await Stream.updateStatus(streamId, 'offline', streamInfo.user_id);
-                    if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
-                      schedulerService.handleStreamStopped(streamId);
+                    if (result.error !== 'Stream is already restarting' && result.error !== 'Restart cooldown active') {
+                      await Stream.updateStatus(streamId, 'offline', streamInfo.user_id);
+                      if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
+                        schedulerService.handleStreamStopped(streamId);
+                      }
                     }
                   } else {
                     if (streamInfo.duration && typeof schedulerService !== 'undefined') {
@@ -390,20 +450,28 @@ async function startStream(streamId) {
                       const elapsed = streamInfo.start_time ? (Date.now() - new Date(streamInfo.start_time).getTime()) / 60000 : 0;
                       const remainingDuration = Math.max(0, streamInfo.duration - elapsed);
                       if (remainingDuration > 0) {
+                        console.log(`[StreamingService] Stream ${streamId} has ${remainingDuration.toFixed(2)} minutes remaining after restart`);
                         schedulerService.scheduleStreamTermination(streamId, remainingDuration);
+                      } else {
+                        console.log(`[StreamingService] Stream ${streamId} exceeded duration, stopping immediately`);
+                        await stopStream(streamId);
                       }
                     }
                   }
                 }
               } catch (error) {
                 console.error(`[StreamingService] Error during stream restart: ${error.message}`);
+                restartingStreams.delete(streamId);
                 const streamInfo = await Stream.findById(streamId);
                 await Stream.updateStatus(streamId, 'offline', streamInfo?.user_id);
                 if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
                   schedulerService.handleStreamStopped(streamId);
                 }
               }
-            }, 3000);
+            }, 5000); // Increased delay to 5 seconds
+            return;
+          } else if (restartingStreams.has(streamId)) {
+            console.log(`[StreamingService] Stream ${streamId} is already restarting, skipping duplicate restart attempt`);
             return;
           }
         }
@@ -469,6 +537,7 @@ async function stopStream(streamId) {
     addStreamLog(streamId, 'Stopping stream...');
     console.log(`[StreamingService] Stopping active stream ${streamId}`);
     manuallyStoppingStreams.add(streamId);
+    restartingStreams.delete(streamId); // Clear restart flag if any
 
     const pid = ffmpegProcess.pid;
     let killed = false;
@@ -539,9 +608,25 @@ async function syncStreamStatuses() {
     console.log('[StreamingService] Syncing stream statuses...');
     const liveStreams = await Stream.findAll(null, 'live');
     for (const stream of liveStreams) {
+      // Skip streams that are currently restarting or manually stopping
+      if (restartingStreams.has(stream.id) || manuallyStoppingStreams.has(stream.id)) {
+        console.log(`[StreamingService] Skipping sync for stream ${stream.id} - restart or stop in progress`);
+        continue;
+      }
+
       const isReallyActive = activeStreams.has(stream.id);
       if (!isReallyActive) {
-        console.log(`[StreamingService] Found inconsistent stream ${stream.id}: marked as 'live' in DB but not active in memory`);
+        // Check if the stream recently became live (within last 30 seconds) - may still be starting
+        const statusUpdatedAt = new Date(stream.status_updated_at);
+        const now = new Date();
+        const timeSinceUpdate = now.getTime() - statusUpdatedAt.getTime();
+
+        if (timeSinceUpdate < 30000) {
+          console.log(`[StreamingService] Stream ${stream.id} status recently updated, skipping sync check`);
+          continue;
+        }
+
+        console.log(`[StreamingService] Found inconsistent stream ${stream.id}: marked as 'live' in DB but not active in memory (last update: ${Math.round(timeSinceUpdate / 1000)}s ago)`);
         await Stream.updateStatus(stream.id, 'offline', stream.user_id);
         if (typeof schedulerService !== 'undefined' && schedulerService.handleStreamStopped) {
           schedulerService.handleStreamStopped(stream.id);
@@ -551,12 +636,18 @@ async function syncStreamStatuses() {
     }
     const activeStreamIds = Array.from(activeStreams.keys());
     for (const streamId of activeStreamIds) {
+      // Skip streams that are currently restarting
+      if (restartingStreams.has(streamId)) {
+        console.log(`[StreamingService] Skipping sync for stream ${streamId} - restart in progress`);
+        continue;
+      }
+
       const stream = await Stream.findById(streamId);
       if (!stream || stream.status !== 'live') {
         console.log(`[StreamingService] Found inconsistent stream ${streamId}: active in memory but not 'live' in DB`);
         if (stream) {
-          await Stream.updateStatus(streamId, 'live', stream.user_id);
-          console.log(`[StreamingService] Updated stream ${streamId} status to 'live'`);
+          await Stream.updateStatusOnly(streamId, 'live', stream.user_id);
+          console.log(`[StreamingService] Updated stream ${streamId} status to 'live' (preserving start_time)`);
         } else {
           console.log(`[StreamingService] Stream ${streamId} not found in DB, removing from active streams`);
           const process = activeStreams.get(streamId);
