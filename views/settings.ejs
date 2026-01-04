@@ -498,6 +498,9 @@
             const result = await response.json();
 
             if (result.success) {
+              const streamsInfo = result.streams || { imported: result.imported || 0, skipped: result.skipped || 0 };
+              const playlistsInfo = result.playlists || { imported: 0, skipped: 0 };
+
               importResult.className = 'mt-4 p-4 bg-green-900/20 rounded-lg border border-green-700/50';
               importResult.innerHTML = `
                 <div class="flex items-center text-green-400">
@@ -505,11 +508,12 @@
                   <span class="font-semibold">Import Successful!</span>
                 </div>
                 <p class="text-sm text-gray-400 mt-2">
-                  ${result.imported} stream(s) imported, ${result.skipped} skipped (duplicates)
+                  <strong>Streams:</strong> ${streamsInfo.imported} imported, ${streamsInfo.skipped} skipped<br>
+                  <strong>Playlists:</strong> ${playlistsInfo.imported} imported, ${playlistsInfo.skipped} skipped
                 </p>
               `;
               importResult.classList.remove('hidden');
-              showToast('success', `Successfully imported ${result.imported} stream(s)`);
+              showToast('success', `Imported ${streamsInfo.imported} stream(s), ${playlistsInfo.imported} playlist(s)`);
             } else {
               throw new Error(result.error || 'Import failed');
             }

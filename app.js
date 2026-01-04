@@ -1941,10 +1941,27 @@ app.get('/api/streams', isAuthenticated, async (req, res) => {
 app.get('/api/streams/export', isAuthenticated, async (req, res) => {
   try {
     const streams = await Stream.findAll(req.session.userId);
+    const playlists = await Playlist.findAll(req.session.userId);
+
+    // Get detailed playlist data with video titles
+    const playlistsWithVideos = await Promise.all(
+      playlists.map(async (playlist) => {
+        const playlistWithVideos = await Playlist.findByIdWithVideos(playlist.id);
+        return {
+          name: playlist.name,
+          description: playlist.description,
+          is_shuffle: playlist.is_shuffle,
+          videos: playlistWithVideos.videos ? playlistWithVideos.videos.map(v => ({
+            title: v.title,
+            position: v.position
+          })) : []
+        };
+      })
+    );
 
     // Prepare export data
     const exportData = {
-      version: '1.0',
+      version: '1.1',
       exported_at: new Date().toISOString(),
       streams: streams.map(stream => ({
         title: stream.title,
@@ -1965,7 +1982,8 @@ app.get('/api/streams/export', isAuthenticated, async (req, res) => {
         auto_daily_live: stream.auto_daily_live,
         daily_start_time: stream.daily_start_time,
         playlist_name: stream.playlist_name || null
-      }))
+      })),
+      playlists: playlistsWithVideos
     };
 
     const filename = `streams-backup-${new Date().toISOString().split('T')[0]}.json`;
@@ -1974,7 +1992,7 @@ app.get('/api/streams/export', isAuthenticated, async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(JSON.stringify(exportData, null, 2));
 
-    console.log(`[Export] User ${req.session.userId} exported ${streams.length} streams`);
+    console.log(`[Export] User ${req.session.userId} exported ${streams.length} streams and ${playlists.length} playlists`);
   } catch (error) {
     console.error('Error exporting streams:', error);
     res.status(500).json({ success: false, error: 'Failed to export streams' });
@@ -2070,16 +2088,59 @@ app.post('/api/streams/import', isAuthenticated, uploadBackup.single('backup'), 
       }
     }
 
+    // Import playlists if present
+    let playlistsImported = 0;
+    let playlistsSkipped = 0;
+
+    if (backupData.playlists && Array.isArray(backupData.playlists)) {
+      const existingPlaylists = await Playlist.findAll(req.session.userId);
+      const existingPlaylistNames = new Set(existingPlaylists.map(p => p.name.toLowerCase()));
+      const videos = await Video.findAll(req.session.userId);
+
+      for (const playlistData of backupData.playlists) {
+        try {
+          // Skip if playlist with same name exists
+          if (existingPlaylistNames.has(playlistData.name.toLowerCase())) {
+            playlistsSkipped++;
+            continue;
+          }
+
+          // Create playlist
+          const newPlaylist = await Playlist.create({
+            name: playlistData.name,
+            description: playlistData.description || null,
+            is_shuffle: playlistData.is_shuffle || false,
+            user_id: req.session.userId
+          });
+
+          // Add videos to playlist if they exist
+          if (playlistData.videos && Array.isArray(playlistData.videos)) {
+            for (const videoRef of playlistData.videos) {
+              const matchingVideo = videos.find(v => v.title.toLowerCase() === videoRef.title.toLowerCase());
+              if (matchingVideo) {
+                await Playlist.addVideo(newPlaylist.id, matchingVideo.id, videoRef.position);
+              }
+            }
+          }
+
+          playlistsImported++;
+          existingPlaylistNames.add(playlistData.name.toLowerCase());
+
+        } catch (playlistError) {
+          errors.push(`Failed to import playlist "${playlistData.name}": ${playlistError.message}`);
+        }
+      }
+    }
+
     // Clean up uploaded file
     fs.unlinkSync(req.file.path);
 
-    console.log(`[Import] User ${req.session.userId} imported ${imported} streams, skipped ${skipped}`);
+    console.log(`[Import] User ${req.session.userId} imported ${imported} streams (${skipped} skipped), ${playlistsImported} playlists (${playlistsSkipped} skipped)`);
 
     res.json({
       success: true,
-      imported,
-      skipped,
-      total: backupData.streams.length,
+      streams: { imported, skipped },
+      playlists: { imported: playlistsImported, skipped: playlistsSkipped },
       errors: errors.length > 0 ? errors : undefined
     });
 
