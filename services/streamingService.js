@@ -36,6 +36,7 @@ function forceKillProcess(ffmpegProcess, pid) {
     }
   });
 }
+
 let ffmpegPath;
 if (fs.existsSync('/usr/bin/ffmpeg')) {
   ffmpegPath = '/usr/bin/ffmpeg';
@@ -44,6 +45,7 @@ if (fs.existsSync('/usr/bin/ffmpeg')) {
   ffmpegPath = ffmpegInstaller.path;
   console.log('Using bundled FFmpeg at:', ffmpegPath);
 }
+
 const Video = require('../models/Video');
 const activeStreams = new Map();
 const streamLogs = new Map();
@@ -51,9 +53,11 @@ const streamRetryCount = new Map();
 const MAX_RETRY_ATTEMPTS = 3;
 const manuallyStoppingStreams = new Set();
 const restartingStreams = new Set(); // Track streams currently in restart process
+const startingStreams = new Set(); // Lock to prevent duplicate startStream calls (PREVENTS DUPLICATE FFMPEG PROCESSES)
 const lastRestartAttempt = new Map(); // Track last restart time for cooldown
 const RESTART_COOLDOWN_MS = 10000; // 10 second cooldown between restart attempts
 const MAX_LOG_LINES = 100;
+
 function addStreamLog(streamId, message) {
   if (!streamLogs.has(streamId)) {
     streamLogs.set(streamId, []);
@@ -67,6 +71,7 @@ function addStreamLog(streamId, message) {
     logs.shift();
   }
 }
+
 async function buildFFmpegArgsForPlaylist(stream, playlist) {
   if (!playlist.videos || playlist.videos.length === 0) {
     throw new Error(`Playlist is empty for playlist_id: ${stream.video_id}`);
@@ -204,6 +209,7 @@ async function buildFFmpegArgs(stream) {
 
   const rtmpUrl = `${stream.rtmp_url.replace(/\/$/, '')}/${stream.stream_key}`;
   const loopArgs = stream.loop_video ? ['-stream_loop', '-1'] : ['-stream_loop', '0'];
+
   if (!stream.use_advanced_settings) {
     return [
       '-hwaccel', 'auto',
@@ -222,9 +228,11 @@ async function buildFFmpegArgs(stream) {
       rtmpUrl
     ];
   }
+
   const resolution = stream.resolution || '1280x720';
   const bitrate = stream.bitrate || 2500;
   const fps = stream.fps || 30;
+
   return [
     '-hwaccel', 'auto',
     '-loglevel', 'info',
@@ -250,13 +258,27 @@ async function buildFFmpegArgs(stream) {
     rtmpUrl
   ];
 }
+
 async function startStream(streamId, isRestart = false) {
   try {
+    // ========== DUPLICATE PROCESS PREVENTION (LOCK MECHANISM) ==========
+    // Check if stream is already being started (prevents race conditions with multiple calls)
+    if (startingStreams.has(streamId)) {
+      console.log(`[StreamingService] Stream ${streamId} is already being started, preventing duplicate process`);
+      return { success: false, error: 'Stream is already being started' };
+    }
+
+    // Add to starting lock immediately
+    startingStreams.add(streamId);
+    console.log(`[StreamingService] Acquired start lock for stream ${streamId}`);
+    // ===================================================================
+
     // Check cooldown for restart attempts
     if (isRestart) {
       const lastAttempt = lastRestartAttempt.get(streamId);
       if (lastAttempt && (Date.now() - lastAttempt) < RESTART_COOLDOWN_MS) {
         console.log(`[StreamingService] Stream ${streamId} is in cooldown period, skipping restart`);
+        startingStreams.delete(streamId); // Release lock
         return { success: false, error: 'Restart cooldown active' };
       }
       lastRestartAttempt.set(streamId, Date.now());
@@ -266,12 +288,15 @@ async function startStream(streamId, isRestart = false) {
     }
 
     if (activeStreams.has(streamId)) {
+      console.log(`[StreamingService] Stream ${streamId} is already active, preventing duplicate process`);
+      startingStreams.delete(streamId); // Release lock
       return { success: false, error: 'Stream is already active' };
     }
 
     // Check if stream is already in restart process
     if (restartingStreams.has(streamId)) {
       console.log(`[StreamingService] Stream ${streamId} is already restarting, skipping duplicate restart`);
+      startingStreams.delete(streamId); // Release lock
       return { success: false, error: 'Stream is already restarting' };
     }
 
@@ -282,16 +307,20 @@ async function startStream(streamId, isRestart = false) {
     const stream = await Stream.findById(streamId);
     if (!stream) {
       restartingStreams.delete(streamId);
+      startingStreams.delete(streamId); // Release lock
       return { success: false, error: 'Stream not found' };
     }
+
     const ffmpegArgs = await buildFFmpegArgs(stream);
     const fullCommand = `${ffmpegPath} ${ffmpegArgs.join(' ')}`;
     addStreamLog(streamId, `${isRestart ? 'Restarting' : 'Starting'} stream with command: ${fullCommand}`);
     console.log(`${isRestart ? 'Restarting' : 'Starting'} stream: ${fullCommand}`);
+
     const ffmpegProcess = spawn(ffmpegPath, ffmpegArgs, {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
+
     activeStreams.set(streamId, ffmpegProcess);
 
     // For restarts, don't update start_time to preserve original timing
@@ -303,6 +332,9 @@ async function startStream(streamId, isRestart = false) {
     }
 
     restartingStreams.delete(streamId);
+    startingStreams.delete(streamId); // Release lock after stream successfully started
+    console.log(`[StreamingService] Released start lock for stream ${streamId}, FFmpeg process started with PID: ${ffmpegProcess.pid}`);
+
     ffmpegProcess.stdout.on('data', (data) => {
       const message = data.toString().trim();
       if (message) {
@@ -310,6 +342,7 @@ async function startStream(streamId, isRestart = false) {
         console.log(`[FFMPEG_STDOUT] ${streamId}: ${message}`);
       }
     });
+
     ffmpegProcess.stderr.on('data', (data) => {
       const message = data.toString().trim();
       if (message) {
@@ -319,6 +352,7 @@ async function startStream(streamId, isRestart = false) {
         }
       }
     });
+
     ffmpegProcess.on('exit', async (code, signal) => {
       addStreamLog(streamId, `Stream ended with code ${code}, signal: ${signal}`);
       console.log(`[FFMPEG_EXIT] ${streamId}: Code=${code}, Signal=${signal}`);
@@ -342,6 +376,7 @@ async function startStream(streamId, isRestart = false) {
         }
         return;
       }
+
       if (signal === 'SIGSEGV') {
         const retryCount = streamRetryCount.get(streamId) || 0;
         if (retryCount < MAX_RETRY_ATTEMPTS && !restartingStreams.has(streamId)) {
@@ -401,7 +436,7 @@ async function startStream(streamId, isRestart = false) {
                 console.error(`Error updating stream status: ${dbError.message}`);
               }
             }
-          }, 5000); // Increased delay to 5 seconds to reduce rapid restart issues
+          }, 5000); // 5 second delay to reduce rapid restart issues
           return;
         } else if (restartingStreams.has(streamId)) {
           console.log(`[StreamingService] Stream ${streamId} is already restarting, skipping duplicate restart attempt`);
@@ -431,7 +466,7 @@ async function startStream(streamId, isRestart = false) {
 
                 const streamInfo = await Stream.findById(streamId);
                 if (streamInfo) {
-                  // Cancel any existing termination timer before restart to prevent race condition
+                  // Cancel any existing termination timer before restart
                   if (typeof schedulerService !== 'undefined' && schedulerService.cancelStreamTermination) {
                     schedulerService.cancelStreamTermination(streamId);
                   }
@@ -446,7 +481,6 @@ async function startStream(streamId, isRestart = false) {
                     }
                   } else {
                     if (streamInfo.duration && typeof schedulerService !== 'undefined') {
-                      // Use streamInfo.start_time (fresh from DB) instead of stale stream variable
                       const elapsed = streamInfo.start_time ? (Date.now() - new Date(streamInfo.start_time).getTime()) / 60000 : 0;
                       const remainingDuration = Math.max(0, streamInfo.duration - elapsed);
                       if (remainingDuration > 0) {
@@ -468,7 +502,7 @@ async function startStream(streamId, isRestart = false) {
                   schedulerService.handleStreamStopped(streamId);
                 }
               }
-            }, 5000); // Increased delay to 5 seconds
+            }, 5000); // 5 second delay
             return;
           } else if (restartingStreams.has(streamId)) {
             console.log(`[StreamingService] Stream ${streamId} is already restarting, skipping duplicate restart attempt`);
@@ -488,6 +522,7 @@ async function startStream(streamId, isRestart = false) {
         }
       }
     });
+
     ffmpegProcess.on('error', async (err) => {
       addStreamLog(streamId, `Error in stream process: ${err.message}`);
       console.error(`[FFMPEG_PROCESS_ERROR] ${streamId}: ${err.message}`);
@@ -502,10 +537,13 @@ async function startStream(streamId, isRestart = false) {
         console.error(`Error updating stream status: ${error.message}`);
       }
     });
+
     ffmpegProcess.unref();
+
     if (stream.duration && typeof schedulerService !== 'undefined') {
       schedulerService.scheduleStreamTermination(streamId, stream.duration);
     }
+
     return {
       success: true,
       message: 'Stream started successfully',
@@ -514,14 +552,18 @@ async function startStream(streamId, isRestart = false) {
   } catch (error) {
     addStreamLog(streamId, `Failed to start stream: ${error.message}`);
     console.error(`Error starting stream ${streamId}:`, error);
+    startingStreams.delete(streamId); // Release lock on error
+    restartingStreams.delete(streamId); // Also release restart flag on error
     return { success: false, error: error.message };
   }
 }
+
 async function stopStream(streamId) {
   try {
     const ffmpegProcess = activeStreams.get(streamId);
     const isActive = ffmpegProcess !== undefined;
     console.log(`[StreamingService] Stop request for stream ${streamId}, isActive: ${isActive}`);
+
     if (!isActive) {
       const stream = await Stream.findById(streamId);
       if (stream && stream.status === 'live') {
@@ -534,10 +576,12 @@ async function stopStream(streamId) {
       }
       return { success: false, error: 'Stream is not active' };
     }
+
     addStreamLog(streamId, 'Stopping stream...');
     console.log(`[StreamingService] Stopping active stream ${streamId}`);
     manuallyStoppingStreams.add(streamId);
     restartingStreams.delete(streamId); // Clear restart flag if any
+    startingStreams.delete(streamId); // Clear starting lock if any
 
     const pid = ffmpegProcess.pid;
     let killed = false;
@@ -603,6 +647,7 @@ async function stopStream(streamId) {
     return { success: false, error: error.message };
   }
 }
+
 async function syncStreamStatuses() {
   try {
     console.log('[StreamingService] Syncing stream statuses...');
@@ -670,16 +715,30 @@ async function syncStreamStatuses() {
     console.error('[StreamingService] Error syncing stream statuses:', error);
   }
 }
+
 setInterval(syncStreamStatuses, 5 * 60 * 1000);
+
 function isStreamActive(streamId) {
   return activeStreams.has(streamId);
 }
+
 function getActiveStreams() {
   return Array.from(activeStreams.keys());
 }
+
 function getStreamLogs(streamId) {
   return streamLogs.get(streamId) || [];
 }
+
+// Helper functions for monitoring stream states
+function getStartingStreams() {
+  return Array.from(startingStreams);
+}
+
+function isStreamStarting(streamId) {
+  return startingStreams.has(streamId);
+}
+
 async function saveStreamHistory(stream) {
   try {
     if (!stream.start_time) {
@@ -850,11 +909,9 @@ module.exports = {
   getActiveStreams,
   getStreamLogs,
   syncStreamStatuses,
-  saveStreamHistory
+  saveStreamHistory,
+  getStartingStreams,
+  isStreamStarting
 };
+
 schedulerService.init(module.exports);
-
-
-
-
-
